@@ -18,7 +18,21 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from month_filter import clamp_week_to_month, month_bounds
-from standard_tasks import rows_for_week
+from standard_tasks import rows_for_week, DAY_COL
+
+# Reverse of DAY_COL (column index -> day name) for human-readable logging.
+_COL_DAY = {col: day for day, col in DAY_COL.items()}
+
+
+def _describe_hours(hours_by_col: dict) -> str:
+    """Human-readable day/hours summary for one task row, e.g. 'Tue,Wed 1.0h'.
+    Empty (QA placeholder) -> 'no hours (placeholder)'."""
+    if not hours_by_col:
+        return "placeholder, no hours"
+    parts = []
+    for col in sorted(hours_by_col):
+        parts.append(f"{_COL_DAY.get(col, f'col{col}')} {hours_by_col[col]}h")
+    return ", ".join(parts)
 
 try:
     import openpyxl
@@ -555,8 +569,9 @@ def cmd_fill_standard(args):
             print(f"[SKIP] {ws_key}: no standard rows for this week", flush=True)
             continue
         insertions[ws_key] = rows
-        names = ", ".join(r["name"] for r in rows)
-        print(f"[INFO] {ws_key}: {len(rows)} row(s) -> {names}", flush=True)
+        print(f"[INFO] {ws_key}: {len(rows)} task(s):", flush=True)
+        for r in rows:
+            print(f"    • {r['name']}  ({_describe_hours(r['hours_by_col'])})", flush=True)
 
     if args.dry_run:
         print("\n[DRY RUN] Excel not modified.", flush=True)

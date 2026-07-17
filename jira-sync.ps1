@@ -16,9 +16,9 @@ function Read-EnvFile {
     return $h
 }
 
-function Save-JiraEnv($url, $email, $token, $project, $accountId) {
-    $keys = @('JIRA_URL','JIRA_EMAIL','JIRA_API_TOKEN','JIRA_PROJECT','JIRA_ACCOUNT_ID')
-    $vals = @{ JIRA_URL=$url; JIRA_EMAIL=$email; JIRA_API_TOKEN=$token; JIRA_PROJECT=$project; JIRA_ACCOUNT_ID=$accountId }
+function Save-JiraEnv($url, $email, $token, $project, $accountId, $excelFile) {
+    $keys = @('JIRA_URL','JIRA_EMAIL','JIRA_API_TOKEN','JIRA_PROJECT','JIRA_ACCOUNT_ID','EXCEL_FILE')
+    $vals = @{ JIRA_URL=$url; JIRA_EMAIL=$email; JIRA_API_TOKEN=$token; JIRA_PROJECT=$project; JIRA_ACCOUNT_ID=$accountId; EXCEL_FILE=$excelFile }
     $lines = @(); $written = @{}
     if (Test-Path $envFile) {
         Get-Content $envFile | ForEach-Object {
@@ -85,34 +85,11 @@ $lblConnStatus.Location = New-Object System.Drawing.Point(130,15)
 $lblConnStatus.Size = New-Object System.Drawing.Size(160,18)
 [void]$pnlTop.Controls.Add($lblConnStatus)
 
-$lblExcel = New-Object System.Windows.Forms.Label
-$lblExcel.Text = 'Excel:'
-$lblExcel.ForeColor = [System.Drawing.Color]::FromArgb(255,180,180,180)
-$lblExcel.Font = New-Object System.Drawing.Font('Segoe UI',9)
-$lblExcel.Location = New-Object System.Drawing.Point(296,15)
-$lblExcel.Size = New-Object System.Drawing.Size(44,18)
-[void]$pnlTop.Controls.Add($lblExcel)
-
+# Excel path lives in Settings only (persisted to .env as EXCEL_FILE). We keep
+# $txtFile as an off-screen holder so the rest of the UI (Read/Submit/Fill) can
+# still read $txtFile.Text without threading the path through every handler.
 $txtFile = New-Object System.Windows.Forms.TextBox
-$txtFile.Location = New-Object System.Drawing.Point(342,12)
-$txtFile.Size = New-Object System.Drawing.Size(478,22)
-$txtFile.Font = New-Object System.Drawing.Font('Segoe UI',9)
-$txtFile.Text = Join-Path $scriptDir 'data\timesheet.xlsx'
-[void]$pnlTop.Controls.Add($txtFile)
-
-$btnBrowse = New-Object System.Windows.Forms.Button
-$btnBrowse.Text = '...'; $btnBrowse.Location = New-Object System.Drawing.Point(826,11)
-$btnBrowse.Size = New-Object System.Drawing.Size(36,24)
-$btnBrowse.FlatStyle = 'Flat'
-$btnBrowse.BackColor = [System.Drawing.Color]::FromArgb(255,70,70,85)
-$btnBrowse.ForeColor = [System.Drawing.Color]::White
-$btnBrowse.Add_Click({
-    $dlg = New-Object System.Windows.Forms.OpenFileDialog
-    $dlg.Filter = 'Excel files (*.xlsx)|*.xlsx'
-    $dlg.InitialDirectory = Split-Path $txtFile.Text -Parent
-    if ($dlg.ShowDialog() -eq 'OK') { $txtFile.Text = $dlg.FileName }
-})
-[void]$pnlTop.Controls.Add($btnBrowse)
+$txtFile.Text = if ($envData['EXCEL_FILE']) { $envData['EXCEL_FILE'] } else { Join-Path $scriptDir 'data\timesheet.xlsx' }
 
 # ---- Button strip ----------------------------------------------------------
 $pnlBtns = New-Object System.Windows.Forms.Panel
@@ -410,7 +387,7 @@ function Show-Settings {
     $btnT.Add_Click({
         $lblTest.Text = 'Testing...'; $lblTest.ForeColor = [System.Drawing.Color]::DodgerBlue
         $dlg.Refresh()
-        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text
+        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text
         $psi2 = New-Object System.Diagnostics.ProcessStartInfo
         $psi2.FileName = 'python'; $psi2.Arguments = "scripts\jira-sync.py --command test --file `"$($tExcel.Text)`""
         $psi2.WorkingDirectory = $scriptDir; $psi2.UseShellExecute = $false
@@ -441,7 +418,7 @@ function Show-Settings {
     $btnSv.BackColor = [System.Drawing.Color]::FromArgb(255,0,122,200)
     $btnSv.ForeColor = [System.Drawing.Color]::White; $btnSv.FlatStyle = 'Flat'
     $btnSv.Add_Click({
-        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text
+        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text
         $txtFile.Text = $tExcel.Text
     })
     [void]$dlg.Controls.Add($btnSv)

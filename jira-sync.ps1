@@ -40,9 +40,9 @@ $envData = Read-EnvFile
 # ============================================================
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Jira -> Timesheet Sync'
-$form.Size = New-Object System.Drawing.Size(900, 680)
-$form.MinimumSize = New-Object System.Drawing.Size(900, 400)
-$form.MaximumSize = New-Object System.Drawing.Size(900, 2000)
+$form.Size = New-Object System.Drawing.Size(1060, 680)
+$form.MinimumSize = New-Object System.Drawing.Size(1060, 400)
+$form.MaximumSize = New-Object System.Drawing.Size(1060, 2000)
 $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 $form.BackColor = [System.Drawing.Color]::FromArgb(242, 242, 245)
@@ -62,7 +62,7 @@ function New-Btn($parent, $text, $x, $y, $w, $h, $r, $g, $b) {
 # ---- Top bar: Settings + connection dot + Excel picker --------------------
 $pnlTop = New-Object System.Windows.Forms.Panel
 $pnlTop.Location = New-Object System.Drawing.Point(0,0)
-$pnlTop.Size = New-Object System.Drawing.Size(900,46)
+$pnlTop.Size = New-Object System.Drawing.Size(1060,46)
 $pnlTop.BackColor = [System.Drawing.Color]::FromArgb(255,50,50,60)
 [void]$form.Controls.Add($pnlTop)
 
@@ -94,7 +94,7 @@ $txtFile.Text = if ($envData['EXCEL_FILE']) { $envData['EXCEL_FILE'] } else { Jo
 # ---- Button strip ----------------------------------------------------------
 $pnlBtns = New-Object System.Windows.Forms.Panel
 $pnlBtns.Location = New-Object System.Drawing.Point(0,46)
-$pnlBtns.Size = New-Object System.Drawing.Size(900,52)
+$pnlBtns.Size = New-Object System.Drawing.Size(1060,52)
 $pnlBtns.BackColor = [System.Drawing.Color]::FromArgb(255,60,60,72)
 [void]$form.Controls.Add($pnlBtns)
 
@@ -115,14 +115,15 @@ $btnFill   = New-Btn $pnlBtns 'Fill Times -> D365'   703 8 155 36 80  80  80
 $btnFill.Enabled = $false
 $btnFill.ForeColor = [System.Drawing.Color]::FromArgb(255,140,140,140)
 
-$btnStop   = New-Btn $pnlBtns 'Stop' 866 8 22 36 140 30 30
+$btnFillStd = New-Btn $pnlBtns 'Standard -> Excel' 866 8 150 36 120 80 160
+$btnStop    = New-Btn $pnlBtns 'Stop' 1024 8 22 36 140 30 30
 $btnStop.Text = [char]9632  # stop square
 $btnStop.Enabled = $false
 
 # ---- Weeks strip (compact, checkbox-only) ----------------------------------
 $pnlWeeks = New-Object System.Windows.Forms.Panel
 $pnlWeeks.Location = New-Object System.Drawing.Point(0,98)
-$pnlWeeks.Size = New-Object System.Drawing.Size(900,40)
+$pnlWeeks.Size = New-Object System.Drawing.Size(1060,40)
 $pnlWeeks.BackColor = [System.Drawing.Color]::White
 [void]$form.Controls.Add($pnlWeeks)
 
@@ -195,7 +196,7 @@ function Populate-Weeks($weeksJson) {
     $cmbMonth.SelectedIndex = 0
 
     # Lay out checkboxes in rows of 5; increase panel height per extra row
-    $colW = 142; $startX = 306; $cols = [Math]::Floor((900 - $startX) / $colW)
+    $colW = 142; $startX = 306; $cols = [Math]::Floor((1060 - $startX) / $colW)
     $rowsNeeded = [Math]::Ceiling($weeksJson.Count / $cols)
     $panelH = 40 + ([Math]::Max($rowsNeeded - 1, 0) * 22)
     $pnlWeeks.Height = $panelH
@@ -228,14 +229,14 @@ $lnkNone.Add_LinkClicked({      foreach ($c in $script:weekCheckboxes) { $c.Chec
 # ---- Divider ---------------------------------------------------------------
 $divider = New-Object System.Windows.Forms.Label
 $divider.Location = New-Object System.Drawing.Point(0,138)
-$divider.Size = New-Object System.Drawing.Size(900,1)
+$divider.Size = New-Object System.Drawing.Size(1060,1)
 $divider.BackColor = [System.Drawing.Color]::FromArgb(255,200,200,210)
 [void]$form.Controls.Add($divider)
 
 # ---- Status bar ------------------------------------------------------------
 $pnlStatus = New-Object System.Windows.Forms.Panel
 $pnlStatus.Location = New-Object System.Drawing.Point(0,139)
-$pnlStatus.Size = New-Object System.Drawing.Size(900,28)
+$pnlStatus.Size = New-Object System.Drawing.Size(1060,28)
 $pnlStatus.BackColor = [System.Drawing.Color]::FromArgb(255,235,235,240)
 [void]$form.Controls.Add($pnlStatus)
 
@@ -622,6 +623,30 @@ $btnSync.Add_Click({
         param($code)
         if ($code -eq 0) { Set-Status 'Sync complete' ([System.Drawing.Color]::LimeGreen) }
         else              { Set-Status ('Sync failed (exit '+$code+')') ([System.Drawing.Color]::OrangeRed) }
+    }
+})
+
+$btnFillStd.Add_Click({
+    if (-not (Test-Path $txtFile.Text)) {
+        [void][System.Windows.Forms.MessageBox]::Show('Excel file not found: ' + $txtFile.Text, 'Standard')
+        return
+    }
+    $monthCode = $null
+    if ($cmbMonth.SelectedIndex -gt 0) { $monthCode = $script:monthCodes[[string]$cmbMonth.SelectedItem] }
+    $selected = @($script:weekCheckboxes | Where-Object { $_.Checked } | ForEach-Object { $_.Tag })
+    if (-not $monthCode -and $selected.Count -eq 0) {
+        [void][System.Windows.Forms.MessageBox]::Show('Select a month or check at least one week.', 'Standard')
+        return
+    }
+    $txtLog.Clear()
+    Set-Status 'Filling standard tasks...' ([System.Drawing.Color]::DodgerBlue)
+    $extraArgs = ''
+    if ($monthCode)            { $extraArgs += ' --month ' + $monthCode }
+    if ($selected.Count -gt 0) { $extraArgs += ' --weeks ' + ($selected -join ' ') }
+    Start-PyProc ('scripts\jira-sync.py --command fill-standard --file "' + $txtFile.Text + '"' + $extraArgs) {
+        param($code)
+        if ($code -eq 0) { Set-Status 'Standard tasks filled' ([System.Drawing.Color]::LimeGreen) }
+        else             { Set-Status ('Fill failed (exit ' + $code + ')') ([System.Drawing.Color]::OrangeRed) }
     }
 })
 

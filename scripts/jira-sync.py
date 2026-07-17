@@ -2,7 +2,8 @@
 """
 Jira -> Excel timesheet sync.
 Reads weeks from Sheet1, runs 6 JQL queries per week, inserts result rows
-before the 'check sum' row. Skips rows that already exist (exact match).
+before the 'check sum' row. Skips rows that already exist (case-insensitive
+name match). Also hosts the fill-standard command for recurring tasks.
 """
 
 import argparse
@@ -556,6 +557,10 @@ def cmd_fill_standard(args):
         insertions[ws_key] = rows
         names = ", ".join(r["name"] for r in rows)
         print(f"[INFO] {ws_key}: {len(rows)} row(s) -> {names}", flush=True)
+
+    if args.dry_run:
+        print("\n[DRY RUN] Excel not modified.", flush=True)
+        return
 
     if insertions:
         total = insert_standard_rows(args.file, insertions)

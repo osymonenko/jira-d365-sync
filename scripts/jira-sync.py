@@ -41,7 +41,7 @@ def load_env(root: Path) -> dict:
             if line and not line.startswith("#") and "=" in line:
                 k, _, v = line.partition("=")
                 env[k.strip()] = v.strip()
-    for key in ("JIRA_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "JIRA_PROJECT"):
+    for key in ("JIRA_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "JIRA_PROJECT", "JIRA_ACCOUNT_ID"):
         if key in os.environ:
             env[key] = os.environ[key]
     return env
@@ -57,7 +57,12 @@ def jira_get(url: str, email: str, token: str) -> dict:
         return json.loads(resp.read().decode())
 
 
-def get_account_id(base_url: str, email: str, token: str) -> str:
+def get_account_id(base_url: str, email: str, token: str, override: str = "") -> str:
+    # If JIRA_ACCOUNT_ID is set in settings, use it verbatim — this is the user
+    # whose activity the JQL queries filter on (BY/creator = <accountId>). Leave it
+    # empty to fall back to the token owner via /myself.
+    if override.strip():
+        return override.strip()
     return jira_get(f"{base_url}/rest/api/3/myself", email, token)["accountId"]
 
 
@@ -153,17 +158,20 @@ def generate_week_rows(
     def issue_url(key: str) -> str:
         return f"{base_url}/browse/{key}"
 
-    # 1. Investigation issue — total count of bugs created this week
+    # 1. Investigation issue — bugs created this week that the user filed
+    #    (creator) or is the reporter of. In Jira creator (who clicked "Create")
+    #    and reporter (who the bug is attributed to) can differ, so match either.
     jql = (f'project = {project} AND issuetype = Bug '
            f'AND created >= "{ws}" AND created <= "{we}" '
+           f'AND (creator = {account_id} OR reporter = {account_id}) '
            f'ORDER BY priority DESC, issuetype ASC, key ASC')
     issues = search_jira(base_url, email, token, jql)
     if issues:
         name = f"Investigation issue {len(issues)}"
-        print(f"  [1/6] Investigation issues (bugs created this week): {len(issues)} found → \"{name}\"", flush=True)
+        print(f"  [1/6] Investigation issues (bugs you created/reported this week): {len(issues)} found → \"{name}\"", flush=True)
         rows.append((name, search_url(jql)))
     else:
-        print(f"  [1/6] Investigation issues (bugs created this week): 0 found", flush=True)
+        print(f"  [1/6] Investigation issues (bugs you created/reported this week): 0 found", flush=True)
 
     # 2. Bug verification — count by priority bucket
     jql = (f'project = {project} AND issuetype = Bug '
@@ -350,8 +358,9 @@ def cmd_test(args):
         sys.exit(1)
     print(f"[INFO] Connecting to {base_url} as {email} ...", flush=True)
     try:
-        account_id = get_account_id(base_url, email, token)
-        print(f"[OK]   Authenticated. Account ID: {account_id}", flush=True)
+        account_id = get_account_id(base_url, email, token, env.get("JIRA_ACCOUNT_ID", ""))
+        source = "settings" if env.get("JIRA_ACCOUNT_ID", "").strip() else "/myself"
+        print(f"[OK]   Authenticated. Account ID: {account_id} (from {source})", flush=True)
         projects = jira_get(f"{base_url}/rest/api/3/project/search?maxResults=5", email, token)
         names = [p["key"] for p in projects.get("values", [])]
         print(f"[OK]   Projects accessible: {', '.join(names) or '(none)'}", flush=True)
@@ -392,8 +401,9 @@ def cmd_sync(args):
 
     print(f"[INFO] Connecting to {base_url} as {email} ...", flush=True)
     try:
-        account_id = get_account_id(base_url, email, token)
-        print(f"[INFO] Account ID: {account_id}", flush=True)
+        account_id = get_account_id(base_url, email, token, env.get("JIRA_ACCOUNT_ID", ""))
+        source = "settings" if env.get("JIRA_ACCOUNT_ID", "").strip() else "/myself"
+        print(f"[INFO] Account ID: {account_id} (from {source})", flush=True)
     except Exception as e:
         print(f"[ERROR] Auth failed: {e}", flush=True)
         sys.exit(1)

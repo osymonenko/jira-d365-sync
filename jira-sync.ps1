@@ -16,9 +16,9 @@ function Read-EnvFile {
     return $h
 }
 
-function Save-JiraEnv($url, $email, $token, $project) {
-    $keys = @('JIRA_URL','JIRA_EMAIL','JIRA_API_TOKEN','JIRA_PROJECT')
-    $vals = @{ JIRA_URL=$url; JIRA_EMAIL=$email; JIRA_API_TOKEN=$token; JIRA_PROJECT=$project }
+function Save-JiraEnv($url, $email, $token, $project, $accountId) {
+    $keys = @('JIRA_URL','JIRA_EMAIL','JIRA_API_TOKEN','JIRA_PROJECT','JIRA_ACCOUNT_ID')
+    $vals = @{ JIRA_URL=$url; JIRA_EMAIL=$email; JIRA_API_TOKEN=$token; JIRA_PROJECT=$project; JIRA_ACCOUNT_ID=$accountId }
     $lines = @(); $written = @{}
     if (Test-Path $envFile) {
         Get-Content $envFile | ForEach-Object {
@@ -328,7 +328,7 @@ $form.Add_Resize({
 function Show-Settings {
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.Text = 'Settings'
-    $dlg.Size = New-Object System.Drawing.Size(560,360)
+    $dlg.Size = New-Object System.Drawing.Size(560,410)
     $dlg.StartPosition = 'CenterParent'
     $dlg.FormBorderStyle = 'FixedDialog'
     $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
@@ -349,28 +349,39 @@ function Show-Settings {
     }
 
     $d = Read-EnvFile
-    $tUrl  = Add-Row $dlg 'Jira URL:'   20
-    $tMail = Add-Row $dlg 'Email:'      58
-    $tTok  = Add-Row $dlg 'API Token:' 96 $true
-    $tProj = Add-Row $dlg 'Project:'   134
+    $tUrl  = Add-Row $dlg 'Jira URL:'    20
+    $tMail = Add-Row $dlg 'Email:'       58
+    $tTok  = Add-Row $dlg 'API Token:'   96 $true
+    $tProj = Add-Row $dlg 'Project:'    134
+    $tAcct = Add-Row $dlg 'Account ID:' 172
 
-    $tUrl.Text  = if ($d['JIRA_URL'])      { $d['JIRA_URL'] }      else { 'https://amcbridge.atlassian.net' }
-    $tMail.Text = if ($d['JIRA_EMAIL'])     { $d['JIRA_EMAIL'] }     else { '' }
-    $tTok.Text  = if ($d['JIRA_API_TOKEN']) { $d['JIRA_API_TOKEN'] } else { '' }
-    $tProj.Text = if ($d['JIRA_PROJECT'])   { $d['JIRA_PROJECT'] }   else { 'GT2' }
+    $tUrl.Text  = if ($d['JIRA_URL'])        { $d['JIRA_URL'] }        else { 'https://amcbridge.atlassian.net' }
+    $tMail.Text = if ($d['JIRA_EMAIL'])       { $d['JIRA_EMAIL'] }       else { '' }
+    $tTok.Text  = if ($d['JIRA_API_TOKEN'])   { $d['JIRA_API_TOKEN'] }   else { '' }
+    $tProj.Text = if ($d['JIRA_PROJECT'])     { $d['JIRA_PROJECT'] }     else { 'GT2' }
+    $tAcct.Text = if ($d['JIRA_ACCOUNT_ID'])  { $d['JIRA_ACCOUNT_ID'] }  else { '' }
+
+    # Hint: which Jira user the activity queries (2,3,4,5,6) filter on. Empty = token owner.
+    $lblAcctHint = New-Object System.Windows.Forms.Label
+    $lblAcctHint.Text = 'Leave empty to use the API-token owner (/myself)'
+    $lblAcctHint.Location = New-Object System.Drawing.Point(114,197)
+    $lblAcctHint.Size = New-Object System.Drawing.Size(390,16)
+    $lblAcctHint.ForeColor = [System.Drawing.Color]::Gray
+    $lblAcctHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
+    [void]$dlg.Controls.Add($lblAcctHint)
 
     # ---- Excel file row ----
     $lblEx = New-Object System.Windows.Forms.Label
-    $lblEx.Text = 'Excel file:'; $lblEx.Location = New-Object System.Drawing.Point(16,175)
+    $lblEx.Text = 'Excel file:'; $lblEx.Location = New-Object System.Drawing.Point(16,222)
     $lblEx.Size = New-Object System.Drawing.Size(90,20); $lblEx.TextAlign = 'MiddleRight'
     [void]$dlg.Controls.Add($lblEx)
     $tExcel = New-Object System.Windows.Forms.TextBox
-    $tExcel.Location = New-Object System.Drawing.Point(114,172)
+    $tExcel.Location = New-Object System.Drawing.Point(114,219)
     $tExcel.Size = New-Object System.Drawing.Size(354,24)
     $tExcel.Text = $txtFile.Text
     [void]$dlg.Controls.Add($tExcel)
     $btnExBrowse = New-Object System.Windows.Forms.Button
-    $btnExBrowse.Text = '...'; $btnExBrowse.Location = New-Object System.Drawing.Point(474,172)
+    $btnExBrowse.Text = '...'; $btnExBrowse.Location = New-Object System.Drawing.Point(474,219)
     $btnExBrowse.Size = New-Object System.Drawing.Size(30,24); $btnExBrowse.FlatStyle = 'Flat'
     $btnExBrowse.Add_Click({
         $fd = New-Object System.Windows.Forms.OpenFileDialog
@@ -381,25 +392,25 @@ function Show-Settings {
     [void]$dlg.Controls.Add($btnExBrowse)
 
     $chkSh = New-Object System.Windows.Forms.CheckBox
-    $chkSh.Text = 'Show token'; $chkSh.Location = New-Object System.Drawing.Point(114,207)
+    $chkSh.Text = 'Show token'; $chkSh.Location = New-Object System.Drawing.Point(114,254)
     $chkSh.Size = New-Object System.Drawing.Size(100,22)
     $chkSh.Add_CheckedChanged({ $tTok.UseSystemPasswordChar = -not $chkSh.Checked })
     [void]$dlg.Controls.Add($chkSh)
 
     $lblTest = New-Object System.Windows.Forms.Label
-    $lblTest.Location = New-Object System.Drawing.Point(16,210)
+    $lblTest.Location = New-Object System.Drawing.Point(16,257)
     $lblTest.Size = New-Object System.Drawing.Size(500,20)
     $lblTest.ForeColor = [System.Drawing.Color]::Gray
     [void]$dlg.Controls.Add($lblTest)
 
     $btnT = New-Object System.Windows.Forms.Button
     $btnT.Text = 'Test Connection'
-    $btnT.Location = New-Object System.Drawing.Point(16,268)
+    $btnT.Location = New-Object System.Drawing.Point(16,316)
     $btnT.Size = New-Object System.Drawing.Size(140,32)
     $btnT.Add_Click({
         $lblTest.Text = 'Testing...'; $lblTest.ForeColor = [System.Drawing.Color]::DodgerBlue
         $dlg.Refresh()
-        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text
+        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text
         $psi2 = New-Object System.Diagnostics.ProcessStartInfo
         $psi2.FileName = 'python'; $psi2.Arguments = "scripts\jira-sync.py --command test --file `"$($tExcel.Text)`""
         $psi2.WorkingDirectory = $scriptDir; $psi2.UseShellExecute = $false
@@ -425,12 +436,12 @@ function Show-Settings {
 
     $btnSv = New-Object System.Windows.Forms.Button
     $btnSv.Text = 'Save & Close'; $btnSv.DialogResult = 'OK'
-    $btnSv.Location = New-Object System.Drawing.Point(410,268)
+    $btnSv.Location = New-Object System.Drawing.Point(410,316)
     $btnSv.Size = New-Object System.Drawing.Size(120,32)
     $btnSv.BackColor = [System.Drawing.Color]::FromArgb(255,0,122,200)
     $btnSv.ForeColor = [System.Drawing.Color]::White; $btnSv.FlatStyle = 'Flat'
     $btnSv.Add_Click({
-        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text
+        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text
         $txtFile.Text = $tExcel.Text
     })
     [void]$dlg.Controls.Add($btnSv)

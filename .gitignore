@@ -1,0 +1,23 @@
+node_modules/
+dist/
+browser-profile/
+edge-profile/
+logs/
+coverage/
+.env
+
+# Excel timesheets — contain real time-tracking data, never commit
+data/
+
+# Playwright / test artifacts
+.playwright-mcp/
+playwright-report/
+test-results/
+
+# Python bytecode from scripts/
+__pycache__/
+*.pyc
+
+# Ad-hoc debug logs
+fail log.txt
+fail log.txt.bak

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+browser-profile/
+edge-profile/
+logs/
+coverage/
+data/
+package-lock.json

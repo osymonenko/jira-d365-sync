@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ' *)",
+      "Bash(node_modules/.bin/tsc --noEmit*)",
+      "Bash(npm test)",
+      "Bash(npm test *)",
+      "Bash(npx tsc --noEmit*)",
+      "Bash(npm run typecheck*)",
+      "Bash(npm run lint*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}

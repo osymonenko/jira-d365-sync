@@ -16,9 +16,9 @@ function Read-EnvFile {
     return $h
 }
 
-function Save-JiraEnv($url, $email, $token, $project, $accountId, $excelFile) {
-    $keys = @('JIRA_URL','JIRA_EMAIL','JIRA_API_TOKEN','JIRA_PROJECT','JIRA_ACCOUNT_ID','EXCEL_FILE')
-    $vals = @{ JIRA_URL=$url; JIRA_EMAIL=$email; JIRA_API_TOKEN=$token; JIRA_PROJECT=$project; JIRA_ACCOUNT_ID=$accountId; EXCEL_FILE=$excelFile }
+function Save-JiraEnv($url, $email, $token, $project, $accountId, $excelFile, $sprintAnchor) {
+    $keys = @('JIRA_URL','JIRA_EMAIL','JIRA_API_TOKEN','JIRA_PROJECT','JIRA_ACCOUNT_ID','EXCEL_FILE','SPRINT_ANCHOR')
+    $vals = @{ JIRA_URL=$url; JIRA_EMAIL=$email; JIRA_API_TOKEN=$token; JIRA_PROJECT=$project; JIRA_ACCOUNT_ID=$accountId; EXCEL_FILE=$excelFile; SPRINT_ANCHOR=$sprintAnchor }
     $lines = @(); $written = @{}
     if (Test-Path $envFile) {
         Get-Content $envFile | ForEach-Object {
@@ -305,7 +305,7 @@ $form.Add_Resize({
 function Show-Settings {
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.Text = 'Settings'
-    $dlg.Size = New-Object System.Drawing.Size(560,410)
+    $dlg.Size = New-Object System.Drawing.Size(560,470)
     $dlg.StartPosition = 'CenterParent'
     $dlg.FormBorderStyle = 'FixedDialog'
     $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
@@ -347,18 +347,28 @@ function Show-Settings {
     $lblAcctHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
     [void]$dlg.Controls.Add($lblAcctHint)
 
+    $tAnchor = Add-Row $dlg 'Sprint end:' 219
+    $tAnchor.Text = if ($d['SPRINT_ANCHOR']) { $d['SPRINT_ANCHOR'] } else { '' }
+    $lblAnchorHint = New-Object System.Windows.Forms.Label
+    $lblAnchorHint.Text = 'Any sprint-end Friday (YYYY-MM-DD) - 2-week cycles counted from here'
+    $lblAnchorHint.Location = New-Object System.Drawing.Point(114,244)
+    $lblAnchorHint.Size = New-Object System.Drawing.Size(390,16)
+    $lblAnchorHint.ForeColor = [System.Drawing.Color]::Gray
+    $lblAnchorHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
+    [void]$dlg.Controls.Add($lblAnchorHint)
+
     # ---- Excel file row ----
     $lblEx = New-Object System.Windows.Forms.Label
-    $lblEx.Text = 'Excel file:'; $lblEx.Location = New-Object System.Drawing.Point(16,222)
+    $lblEx.Text = 'Excel file:'; $lblEx.Location = New-Object System.Drawing.Point(16,269)
     $lblEx.Size = New-Object System.Drawing.Size(90,20); $lblEx.TextAlign = 'MiddleRight'
     [void]$dlg.Controls.Add($lblEx)
     $tExcel = New-Object System.Windows.Forms.TextBox
-    $tExcel.Location = New-Object System.Drawing.Point(114,219)
+    $tExcel.Location = New-Object System.Drawing.Point(114,266)
     $tExcel.Size = New-Object System.Drawing.Size(354,24)
     $tExcel.Text = $txtFile.Text
     [void]$dlg.Controls.Add($tExcel)
     $btnExBrowse = New-Object System.Windows.Forms.Button
-    $btnExBrowse.Text = '...'; $btnExBrowse.Location = New-Object System.Drawing.Point(474,219)
+    $btnExBrowse.Text = '...'; $btnExBrowse.Location = New-Object System.Drawing.Point(474,266)
     $btnExBrowse.Size = New-Object System.Drawing.Size(30,24); $btnExBrowse.FlatStyle = 'Flat'
     $btnExBrowse.Add_Click({
         $fd = New-Object System.Windows.Forms.OpenFileDialog
@@ -369,25 +379,25 @@ function Show-Settings {
     [void]$dlg.Controls.Add($btnExBrowse)
 
     $chkSh = New-Object System.Windows.Forms.CheckBox
-    $chkSh.Text = 'Show token'; $chkSh.Location = New-Object System.Drawing.Point(114,254)
+    $chkSh.Text = 'Show token'; $chkSh.Location = New-Object System.Drawing.Point(114,301)
     $chkSh.Size = New-Object System.Drawing.Size(100,22)
     $chkSh.Add_CheckedChanged({ $tTok.UseSystemPasswordChar = -not $chkSh.Checked })
     [void]$dlg.Controls.Add($chkSh)
 
     $lblTest = New-Object System.Windows.Forms.Label
-    $lblTest.Location = New-Object System.Drawing.Point(16,257)
+    $lblTest.Location = New-Object System.Drawing.Point(16,304)
     $lblTest.Size = New-Object System.Drawing.Size(500,20)
     $lblTest.ForeColor = [System.Drawing.Color]::Gray
     [void]$dlg.Controls.Add($lblTest)
 
     $btnT = New-Object System.Windows.Forms.Button
     $btnT.Text = 'Test Connection'
-    $btnT.Location = New-Object System.Drawing.Point(16,316)
+    $btnT.Location = New-Object System.Drawing.Point(16,363)
     $btnT.Size = New-Object System.Drawing.Size(140,32)
     $btnT.Add_Click({
         $lblTest.Text = 'Testing...'; $lblTest.ForeColor = [System.Drawing.Color]::DodgerBlue
         $dlg.Refresh()
-        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text
+        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text
         $psi2 = New-Object System.Diagnostics.ProcessStartInfo
         $psi2.FileName = 'python'; $psi2.Arguments = "scripts\jira-sync.py --command test --file `"$($tExcel.Text)`""
         $psi2.WorkingDirectory = $scriptDir; $psi2.UseShellExecute = $false
@@ -413,12 +423,12 @@ function Show-Settings {
 
     $btnSv = New-Object System.Windows.Forms.Button
     $btnSv.Text = 'Save & Close'; $btnSv.DialogResult = 'OK'
-    $btnSv.Location = New-Object System.Drawing.Point(410,316)
+    $btnSv.Location = New-Object System.Drawing.Point(410,363)
     $btnSv.Size = New-Object System.Drawing.Size(120,32)
     $btnSv.BackColor = [System.Drawing.Color]::FromArgb(255,0,122,200)
     $btnSv.ForeColor = [System.Drawing.Color]::White; $btnSv.FlatStyle = 'Flat'
     $btnSv.Add_Click({
-        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text
+        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text
         $txtFile.Text = $tExcel.Text
     })
     [void]$dlg.Controls.Add($btnSv)

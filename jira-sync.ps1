@@ -286,7 +286,7 @@ $btnCopyLog.Add_Click({
 # ---- Log -------------------------------------------------------------------
 $txtLog = New-Object System.Windows.Forms.RichTextBox
 $txtLog.Location = New-Object System.Drawing.Point(0,167)
-$txtLog.Size = New-Object System.Drawing.Size(900,472)
+$txtLog.Size = New-Object System.Drawing.Size(1060,472)
 $txtLog.ReadOnly = $true
 $txtLog.BackColor = [System.Drawing.Color]::FromArgb(255,20,20,26)
 $txtLog.ForeColor = [System.Drawing.Color]::FromArgb(255,200,200,200)

@@ -370,17 +370,82 @@ def update_excel(file_path: str, insertions: dict) -> int:
     return total
 
 
+_DAY_COLS = (4, 5, 6, 7, 8)  # Mon..Fri
+_COL_LETTER = {4: "D", 5: "E", 6: "F", 7: "G", 8: "H"}
+
+
+def _write_check_sum(ws, row: int, first_task_row: int, last_task_row: int) -> None:
+    """Write a 'check sum' row: col C label + per-day SUM formulas spanning the
+    week's task rows. This row is ignored by the D365 importer (which skips any
+    'check sum' task name)."""
+    ws.cell(row=row, column=3).value = "check sum"
+    for col in _DAY_COLS:
+        letter = _COL_LETTER[col]
+        ws.cell(row=row, column=col).value = f"=SUM({letter}{first_task_row}:{letter}{last_task_row})"
+
+
 def insert_standard_rows(file_path: str, insertions: dict) -> int:
-    """insertions[key] = list of {"name": str, "hours_by_col": {col: hours}}."""
+    """Fill standard task rows into existing week blocks.
+
+    insertions[key] = list of {"name": str, "hours_by_col": {col: hours}}.
+
+    Unlike the Jira path, standard rows are packed from the TOP of the block:
+    the first task lands on the week's date row (column C), the rest follow on
+    consecutive rows, and a 'check sum' row with per-day =SUM() formulas is
+    written directly below the last task. Names already present in the block
+    are skipped (case-insensitive). Processed bottom-up so that inserting extra
+    rows (only when a block lacks blank space) never invalidates upper blocks.
+    """
     wb = openpyxl.load_workbook(file_path)
     ws = wb.worksheets[0]
+    weeks = find_weeks(ws)
+    total = 0
 
-    def write_row(row_idx, p):
-        ws.cell(row=row_idx, column=3).value = p["name"]
-        for col, hours in p["hours_by_col"].items():
-            ws.cell(row=row_idx, column=col).value = int(hours) if float(hours).is_integer() else hours
+    for week in reversed(weeks):
+        key = fmt(week["week_start"])
+        if key not in insertions:
+            continue
+        existing_lower = {n.lower() for n in week["existing_names"]}
+        new_rows = [p for p in insertions[key] if p["name"].lower() not in existing_lower]
+        if not new_rows:
+            print(f"[SKIP] {key}: all rows already present", flush=True)
+            continue
 
-    total = _apply_insertions(ws, insertions, write_row)
+        start, end, check = week["start_row"], week["end_row"], week["check_sum_row"]
+
+        # Task rows already in the block (excluding any check-sum row).
+        occupied = [
+            r for r in range(start, end)
+            if r != check
+            and ws.cell(r, 3).value not in (None, "")
+            and str(ws.cell(r, 3).value).strip().lower() != "check sum"
+        ]
+        first_write = (max(occupied) + 1) if occupied else start  # first task on the date row
+        sum_first = min(occupied) if occupied else start
+
+        # Drop any pre-existing check-sum row so we don't leave a stale duplicate.
+        if check is not None:
+            for col in (3,) + _DAY_COLS:
+                ws.cell(check, col).value = None
+
+        last_task_row = first_write + len(new_rows) - 1
+        check_row = last_task_row + 1
+
+        # Make room only if the check-sum row would collide with the next block.
+        overflow = check_row - (end - 1)
+        if overflow > 0:
+            _insert_rows_preserving_hyperlinks(ws, end, overflow)
+
+        for i, p in enumerate(new_rows):
+            r = first_write + i
+            ws.cell(r, 3).value = p["name"]
+            for col, hours in p["hours_by_col"].items():
+                ws.cell(r, col).value = int(hours) if float(hours).is_integer() else hours
+
+        _write_check_sum(ws, check_row, sum_first, last_task_row)
+        total += len(new_rows)
+        print(f"[OK]   {key}: {len(new_rows)} rows written (check sum at row {check_row})", flush=True)
+
     try:
         wb.save(file_path)
     except PermissionError:

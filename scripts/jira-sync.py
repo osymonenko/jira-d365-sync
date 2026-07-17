@@ -17,6 +17,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from month_filter import clamp_week_to_month, month_bounds
+from standard_tasks import rows_for_week
 
 try:
     import openpyxl
@@ -304,37 +305,67 @@ def _insert_rows_preserving_hyperlinks(ws, idx: int, amount: int) -> None:
         ws.cell(row=r + amount, column=c).hyperlink = target
 
 
-def update_excel(file_path: str, insertions: dict) -> int:
-    wb = openpyxl.load_workbook(file_path)
-    ws = wb.worksheets[0]
+def _apply_insertions(ws, insertions: dict, write_row) -> int:
+    """Insert rows bottom-up into existing week blocks.
+
+    insertions[key] is a list of payload dicts (each with a "name"). Rows whose
+    name already exists in the block (case-insensitive) are skipped. For each
+    surviving row, write_row(row_idx, payload) fills its cells.
+    """
     weeks = find_weeks(ws)
     total = 0
-    link_font = openpyxl.styles.Font(color="0563C1", underline="single")
-
-    # Process bottom-up so earlier row indices stay valid
     for week in reversed(weeks):
         key = fmt(week["week_start"])
         if key not in insertions:
             continue
-        new_rows = [(name, url) for name, url in insertions[key]
-                    if name not in week["existing_names"]]
+        existing_lower = {n.lower() for n in week["existing_names"]}
+        new_rows = [p for p in insertions[key] if p["name"].lower() not in existing_lower]
         if not new_rows:
             print(f"[SKIP] {key}: all rows already present", flush=True)
             continue
-        # Prefer the check sum row as the anchor (insert above it). Weeks with
-        # no check sum row fall back to the block end (start of the next week).
         check_row = week["check_sum_row"]
         anchor = check_row if check_row is not None else week["end_row"]
         _insert_rows_preserving_hyperlinks(ws, anchor, len(new_rows))
-        for i, (name, url) in enumerate(new_rows):
-            cell = ws.cell(row=anchor + i, column=3)
-            cell.value = name
-            cell.hyperlink = url
-            cell.font = link_font
+        for i, payload in enumerate(new_rows):
+            write_row(anchor + i, payload)
         total += len(new_rows)
         note = "" if check_row is not None else " (no check sum row; appended to block end)"
         print(f"[OK]   {key}: {len(new_rows)} rows inserted{note}", flush=True)
+    return total
 
+
+def update_excel(file_path: str, insertions: dict) -> int:
+    wb = openpyxl.load_workbook(file_path)
+    ws = wb.worksheets[0]
+    link_font = openpyxl.styles.Font(color="0563C1", underline="single")
+    payloads = {k: [{"name": n, "url": u} for (n, u) in rows] for k, rows in insertions.items()}
+
+    def write_row(row_idx, p):
+        cell = ws.cell(row=row_idx, column=3)
+        cell.value = p["name"]
+        cell.hyperlink = p["url"]
+        cell.font = link_font
+
+    total = _apply_insertions(ws, payloads, write_row)
+    try:
+        wb.save(file_path)
+    except PermissionError:
+        print(f"[ERROR] Cannot save — close the file in Excel first: {file_path}", flush=True)
+        return 0
+    return total
+
+
+def insert_standard_rows(file_path: str, insertions: dict) -> int:
+    """insertions[key] = list of {"name": str, "hours_by_col": {col: hours}}."""
+    wb = openpyxl.load_workbook(file_path)
+    ws = wb.worksheets[0]
+
+    def write_row(row_idx, p):
+        ws.cell(row=row_idx, column=3).value = p["name"]
+        for col, hours in p["hours_by_col"].items():
+            ws.cell(row=row_idx, column=col).value = int(hours) if float(hours).is_integer() else hours
+
+    total = _apply_insertions(ws, insertions, write_row)
     try:
         wb.save(file_path)
     except PermissionError:
@@ -469,13 +500,77 @@ def cmd_sync(args):
         print("\n[DONE] Nothing to insert.", flush=True)
 
 
+def cmd_fill_standard(args):
+    root = Path(args.file).resolve().parent.parent
+    env = load_env(root)
+
+    if args.month:
+        try:
+            month_bounds(args.month)
+        except ValueError as e:
+            print(f"[ERROR] {e}", flush=True)
+            sys.exit(1)
+
+    sprint_anchor = None
+    raw_anchor = env.get("SPRINT_ANCHOR", "").strip()
+    if raw_anchor:
+        try:
+            sprint_anchor = datetime.strptime(raw_anchor, "%Y-%m-%d").date()
+            if sprint_anchor.weekday() != 4:  # 0=Mon .. 4=Fri
+                snapped = sprint_anchor + timedelta(days=(4 - sprint_anchor.weekday()))
+                print(f"[WARN] SPRINT_ANCHOR {raw_anchor} is not a Friday; using {fmt(snapped)}", flush=True)
+                sprint_anchor = snapped
+        except ValueError:
+            print(f"[WARN] SPRINT_ANCHOR {raw_anchor!r} invalid (want YYYY-MM-DD); sprint-end tasks skipped", flush=True)
+            sprint_anchor = None
+    else:
+        print("[WARN] SPRINT_ANCHOR not set; sprint-end tasks (sprint review, summary report) skipped", flush=True)
+
+    wb_read = openpyxl.load_workbook(args.file, data_only=True)
+    weeks_info = find_weeks(wb_read.worksheets[0])
+    wb_read.close()
+    if not weeks_info:
+        print("[ERROR] No week blocks found in Excel", flush=True)
+        sys.exit(1)
+
+    if args.weeks:
+        selected = set(args.weeks)
+        weeks_info = [
+            w for w in weeks_info
+            if any(abs(((w["week_start"] + timedelta(days=1)) - datetime.strptime(m, "%Y-%m-%d").date()).days) <= 1
+                   for m in selected)
+        ]
+        if not weeks_info:
+            print("[ERROR] None of the specified weeks found in Excel", flush=True)
+            sys.exit(1)
+
+    today = date.today()
+    insertions = {}
+    for week in weeks_info:
+        ws_key = fmt(week["week_start"])
+        we = week["week_end"] or (week["week_start"] + timedelta(days=6))
+        rows = rows_for_week(week["week_start"], we, args.month, sprint_anchor, today)
+        if not rows:
+            print(f"[SKIP] {ws_key}: no standard rows for this week", flush=True)
+            continue
+        insertions[ws_key] = rows
+        names = ", ".join(r["name"] for r in rows)
+        print(f"[INFO] {ws_key}: {len(rows)} row(s) -> {names}", flush=True)
+
+    if insertions:
+        total = insert_standard_rows(args.file, insertions)
+        print(f"\n[DONE] {total} rows inserted.", flush=True)
+    else:
+        print("\n[DONE] Nothing to insert.", flush=True)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--command", choices=["test", "read-weeks", "sync"], default="sync")
+    parser.add_argument("--command", choices=["test", "read-weeks", "sync", "fill-standard"], default="sync")
     parser.add_argument("--file")
     parser.add_argument("--weeks", nargs="*", help="Monday dates YYYY-MM-DD (space separated)")
     parser.add_argument("--month", help="Clamp week windows to this month (YYYY-MM)")
@@ -486,6 +581,11 @@ def main():
         cmd_test(args)
     elif args.command == "read-weeks":
         cmd_read_weeks(args)
+    elif args.command == "fill-standard":
+        if not args.file:
+            print("[ERROR] --file required for fill-standard", flush=True)
+            sys.exit(1)
+        cmd_fill_standard(args)
     else:
         if not args.file:
             print("[ERROR] --file required for sync", flush=True)

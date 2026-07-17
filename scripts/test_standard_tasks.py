@@ -23,6 +23,8 @@ check("weekly report Fri", rows["Weekly project report"], {8: 1.0})
 
 # --- sprint-end tasks: present on anchor week ---
 check("sprint review present", "Internal sprint review" in rows, True)
+check("ext sprint review present", "External sprint review" in rows, True)
+check("ext sprint review Fri 1h", rows["External sprint review"], {8: 1.0})
 check("summary present", "Summary report creation" in rows, True)
 check("summary hours", rows["Summary report creation"], {8: 2.0})
 

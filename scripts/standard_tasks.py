@@ -18,6 +18,7 @@ SCHEDULE = [
     {"name": "External customer meeting", "hours": 1.0, "days": ["Tue", "Wed"],   "freq": "weekly"},
     {"name": "Weekly project report",     "hours": 1.0, "days": ["Fri"],          "freq": "weekly"},
     {"name": "Internal sprint review",    "hours": 0.5, "days": ["Fri"],          "freq": "sprint-end"},
+    {"name": "External sprint review",    "hours": 1.0, "days": ["Fri"],          "freq": "sprint-end"},
     {"name": "Summary report creation",   "hours": 2.0, "days": ["Fri"],          "freq": "sprint-end"},
 ]
 

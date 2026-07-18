@@ -75,20 +75,17 @@ function New-Btn($parent, $text, $x, $y, $w, $h, $r, $g, $b) {
     [void]$parent.Controls.Add($btn); return $btn
 }
 
-# ---- Top bar: Settings + connection dot + Excel picker --------------------
+# ---- Toolbar row 1: connection status + setup actions ---------------------
 $pnlTop = New-Object System.Windows.Forms.Panel
 $pnlTop.Location = New-Object System.Drawing.Point(0,0)
 $pnlTop.Size = New-Object System.Drawing.Size(1060,46)
 $pnlTop.BackColor = [System.Drawing.Color]::FromArgb(255,50,50,60)
 [void]$form.Controls.Add($pnlTop)
 
-$btnSettings = New-Btn $pnlTop 'Settings' 8 8 90 30 70 70 85
-$btnSettings.Font = New-Object System.Drawing.Font('Segoe UI',9)
-
 $lblDot = New-Object System.Windows.Forms.Label
 $lblDot.Text = 'l'; $lblDot.ForeColor = [System.Drawing.Color]::Gray
 $lblDot.Font = New-Object System.Drawing.Font('Segoe UI',18,[System.Drawing.FontStyle]::Bold)
-$lblDot.Location = New-Object System.Drawing.Point(106,6)
+$lblDot.Location = New-Object System.Drawing.Point(8,6)
 $lblDot.Size = New-Object System.Drawing.Size(22,30)
 $lblDot.TextAlign = 'MiddleCenter'
 [void]$pnlTop.Controls.Add($lblDot)
@@ -97,9 +94,14 @@ $lblConnStatus = New-Object System.Windows.Forms.Label
 $lblConnStatus.Text = 'not tested'
 $lblConnStatus.ForeColor = [System.Drawing.Color]::FromArgb(255,180,180,180)
 $lblConnStatus.Font = New-Object System.Drawing.Font('Segoe UI',9)
-$lblConnStatus.Location = New-Object System.Drawing.Point(130,15)
-$lblConnStatus.Size = New-Object System.Drawing.Size(160,18)
+$lblConnStatus.Location = New-Object System.Drawing.Point(32,15)
+$lblConnStatus.Size = New-Object System.Drawing.Size(110,18)
 [void]$pnlTop.Controls.Add($lblConnStatus)
+
+$btnTest     = New-Btn $pnlTop '❓ Test'      150 6 74  34 70  70  85
+$btnSettings = New-Btn $pnlTop '⚙️ Settings'  230 6 100 34 70  70  85
+$btnRead     = New-Btn $pnlTop '👀 Read File' 336 6 120 34 40  100 140
+$btnOpen     = New-Btn $pnlTop '✏️ Open File' 462 6 120 34 40  110 60
 
 # Excel path lives in Settings only (persisted to .env as EXCEL_FILE). We keep
 # $txtFile as an off-screen holder so the rest of the UI (Read/Submit/Fill) can
@@ -107,33 +109,21 @@ $lblConnStatus.Size = New-Object System.Drawing.Size(160,18)
 $txtFile = New-Object System.Windows.Forms.TextBox
 $txtFile.Text = if ($envData['EXCEL_FILE']) { $envData['EXCEL_FILE'] } else { Join-Path $scriptDir 'data\timesheet.xlsx' }
 
-# ---- Button strip ----------------------------------------------------------
+# ---- Toolbar row 2: actions that do work -----------------------------------
 $pnlBtns = New-Object System.Windows.Forms.Panel
 $pnlBtns.Location = New-Object System.Drawing.Point(0,46)
 $pnlBtns.Size = New-Object System.Drawing.Size(1060,52)
 $pnlBtns.BackColor = [System.Drawing.Color]::FromArgb(255,60,60,72)
 [void]$form.Controls.Add($pnlBtns)
 
-$btnTest   = New-Btn $pnlBtns 'Test'           8   8 80 36 70  70  90
-$btnRead   = New-Btn $pnlBtns 'Read File'      96  8 110 36 40  100 140
-$btnOpen   = New-Btn $pnlBtns 'Open File'      214 8 100 36 40  110 60
-
-# separator (visual gap)
-$sep = New-Object System.Windows.Forms.Label
-$sep.Location = New-Object System.Drawing.Point(322,10)
-$sep.Size = New-Object System.Drawing.Size(2,30)
-$sep.BackColor = [System.Drawing.Color]::FromArgb(255,100,100,115)
-[void]$pnlBtns.Controls.Add($sep)
-
-$btnSync   = New-Btn $pnlBtns 'Sync Jira -> Excel'  332 8 170 36 0   122 200
-$btnSubmit = New-Btn $pnlBtns 'Submit Tasks -> D365' 510 8 185 36 180 80  0
-$btnFill   = New-Btn $pnlBtns 'Fill Times -> D365'   703 8 155 36 80  80  80
+$btnFillStd = New-Btn $pnlBtns 'Standard ⬇️'         8   8 150 36 120 80  160
+$btnSync    = New-Btn $pnlBtns 'Jira ⬇️'             166 8 150 36 0   122 200
+$btnSubmit  = New-Btn $pnlBtns 'Submit tasks ➡️'      324 8 185 36 180 80  0
+$btnFill    = New-Btn $pnlBtns 'Fill days ⬆️⬆️⬆️⬆️⬆️' 517 8 220 36 80  80  80
 $btnFill.Enabled = $false
 $btnFill.ForeColor = [System.Drawing.Color]::FromArgb(255,140,140,140)
 
-$btnFillStd = New-Btn $pnlBtns 'Standard -> Excel' 866 8 150 36 120 80 160
-$btnStop    = New-Btn $pnlBtns 'Stop' 1024 8 22 36 140 30 30
-$btnStop.Text = [char]9632  # stop square
+$btnStop = New-Btn $pnlBtns '⛔' 1024 8 22 36 140 30 30
 $btnStop.Enabled = $false
 
 # ---- Weeks strip (compact, checkbox-only) ----------------------------------

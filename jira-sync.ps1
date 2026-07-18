@@ -365,28 +365,37 @@ function Show-Settings {
         foreach ($q in $jqlCfg.queries) { if ($jqlValues.ContainsKey($q.key) -and $q.jql) { $jqlValues[$q.key] = $q.jql } }
     }
 
-    $panelJql = New-Object System.Windows.Forms.Panel
-    $panelJql.Location = New-Object System.Drawing.Point(0,0)
-    $panelJql.Dock = 'Fill'; $panelJql.AutoScroll = $true
-    [void]$tabJql.Controls.Add($panelJql)
+    $panelJqlFlow = New-Object System.Windows.Forms.FlowLayoutPanel
+    $panelJqlFlow.Location = New-Object System.Drawing.Point(0,0)
+    $panelJqlFlow.Dock = 'Fill'
+    $panelJqlFlow.FlowDirection = 'TopDown'
+    $panelJqlFlow.WrapContents = $false
+    $panelJqlFlow.AutoScroll = $true
+    [void]$tabJql.Controls.Add($panelJqlFlow)
 
     $script:jqlBoxes = @{}
-    $y = 8
-    foreach ($slot in $jqlSlots) {
+
+    function New-JqlFixedRow($slot) {
+        $row = New-Object System.Windows.Forms.Panel
+        $row.Size = New-Object System.Drawing.Size(566,74)
+        $row.Margin = New-Object System.Windows.Forms.Padding(4,4,4,0)
+        $row.Tag = $slot.key
+
         $lbl = New-Object System.Windows.Forms.Label
-        $lbl.Text = $slot.label; $lbl.Location = New-Object System.Drawing.Point(8,$y)
+        $lbl.Text = $slot.label; $lbl.Location = New-Object System.Drawing.Point(0,0)
         $lbl.Size = New-Object System.Drawing.Size(400,16); $lbl.Font = New-Object System.Drawing.Font('Segoe UI',9,[System.Drawing.FontStyle]::Bold)
-        [void]$panelJql.Controls.Add($lbl)
+        [void]$row.Controls.Add($lbl)
+
         $box = New-Object System.Windows.Forms.TextBox
         $box.Multiline = $true; $box.ScrollBars = 'Vertical'; $box.WordWrap = $true
-        $box.Location = New-Object System.Drawing.Point(8,($y+18)); $box.Size = New-Object System.Drawing.Size(490,46)
+        $box.Location = New-Object System.Drawing.Point(0,18); $box.Size = New-Object System.Drawing.Size(490,46)
         $box.Font = New-Object System.Drawing.Font('Consolas',8)
         $box.Text = [string]$jqlValues[$slot.key]
-        [void]$panelJql.Controls.Add($box)
+        [void]$row.Controls.Add($box)
         $script:jqlBoxes[$slot.key] = $box
 
         $btnCopy = New-Object System.Windows.Forms.Button
-        $btnCopy.Text = 'Copy'; $btnCopy.Location = New-Object System.Drawing.Point(502,($y+18)); $btnCopy.Size = New-Object System.Drawing.Size(64,46)
+        $btnCopy.Text = 'Copy'; $btnCopy.Location = New-Object System.Drawing.Point(494,18); $btnCopy.Size = New-Object System.Drawing.Size(64,46)
         $btnCopy.FlatStyle = 'Flat'; $btnCopy.Tag = $slot.key
         $btnCopy.Add_Click({
             $key = $this.Tag
@@ -405,9 +414,12 @@ function Show-Settings {
             $resolved = $tpl.Replace('{project}',$proj).Replace('{account_id}',$acct).Replace('{ws}',$ws).Replace('{we}',$we)
             [System.Windows.Forms.Clipboard]::SetText($resolved)
         })
-        [void]$panelJql.Controls.Add($btnCopy)
-        $y += 74
+        [void]$row.Controls.Add($btnCopy)
+
+        [void]$panelJqlFlow.Controls.Add($row)
     }
+
+    foreach ($slot in $jqlSlots) { New-JqlFixedRow $slot }
 
     $gridStd = New-Object System.Windows.Forms.DataGridView
     $gridStd.Location = New-Object System.Drawing.Point(8,8)

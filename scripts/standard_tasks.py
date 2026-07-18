@@ -57,14 +57,29 @@ def _friday(week_start: date) -> date:
     return week_start + timedelta(days=DAY_OFFSET["Fri"])
 
 
-def is_sprint_end_week(week_start: date, sprint_anchor: date) -> bool:
-    """A week is a sprint end iff its Friday is a whole number of 2-week cycles
-    away from the anchor Friday."""
-    return (_friday(week_start) - sprint_anchor).days % 14 == 0
+def parse_sprint_length_weeks(raw: str):
+    """Parse the SPRINT_LENGTH_WEEKS .env value. Empty -> (2, None). Present
+    but not a positive integer -> (2, warning_message) — never raises."""
+    raw = (raw or "").strip()
+    if not raw:
+        return 2, None
+    try:
+        weeks = int(raw)
+        if weeks <= 0:
+            raise ValueError("must be positive")
+        return weeks, None
+    except ValueError:
+        return 2, f"[WARN] SPRINT_LENGTH_WEEKS {raw!r} invalid (want a positive integer); using default 2"
+
+
+def is_sprint_end_week(week_start: date, sprint_anchor: date, cycle_days: int = 14) -> bool:
+    """A week is a sprint end iff its Friday is a whole number of `cycle_days`-day
+    cycles away from the anchor Friday. Default cycle_days=14 (2-week sprint)."""
+    return (_friday(week_start) - sprint_anchor).days % cycle_days == 0
 
 
 def rows_for_week(week_start, week_end, month, sprint_anchor, today,
-                  schedule=None, placeholders=None):
+                  schedule=None, placeholders=None, cycle_days=14):
     """Standard task rows for one week block.
 
     Returns list of {"name": str, "hours_by_col": {col: hours}}.
@@ -86,7 +101,7 @@ def rows_for_week(week_start, week_end, month, sprint_anchor, today,
     rows = []
     for task in schedule:
         if task["freq"] == "sprint-end":
-            if sprint_anchor is None or not is_sprint_end_week(week_start, sprint_anchor):
+            if sprint_anchor is None or not is_sprint_end_week(week_start, sprint_anchor, cycle_days):
                 continue
         hours_by_col = {}
         for day in task["days"]:

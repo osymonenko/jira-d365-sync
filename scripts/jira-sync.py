@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from month_filter import clamp_week_to_month, month_bounds
-from standard_tasks import rows_for_week, DAY_COL, load_schedule
+from standard_tasks import rows_for_week, DAY_COL, load_schedule, parse_sprint_length_weeks
 
 import pathlib as _pathlib
 _CONFIG_DIR = _pathlib.Path(__file__).resolve().parent.parent / "config"
@@ -670,6 +670,11 @@ def cmd_fill_standard(args):
     else:
         print("[WARN] SPRINT_ANCHOR not set; sprint-end tasks (sprint review, summary report) skipped", flush=True)
 
+    sprint_length_weeks, sprint_len_warning = parse_sprint_length_weeks(env.get("SPRINT_LENGTH_WEEKS", ""))
+    if sprint_len_warning:
+        print(sprint_len_warning, flush=True)
+    cycle_days = sprint_length_weeks * 7
+
     wb_read = openpyxl.load_workbook(args.file, data_only=True)
     weeks_info = find_weeks(wb_read.worksheets[0])
     wb_read.close()
@@ -695,7 +700,7 @@ def cmd_fill_standard(args):
         ws_key = fmt(week["week_start"])
         we = week["week_end"] or (week["week_start"] + timedelta(days=6))
         rows = rows_for_week(week["week_start"], we, args.month, sprint_anchor, today,
-                             schedule=schedule, placeholders=placeholders)
+                             schedule=schedule, placeholders=placeholders, cycle_days=cycle_days)
         if not rows:
             print(f"[SKIP] {ws_key}: no standard rows for this week", flush=True)
             continue

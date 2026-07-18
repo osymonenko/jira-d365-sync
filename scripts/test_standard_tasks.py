@@ -1,5 +1,5 @@
 from datetime import date
-from standard_tasks import rows_for_week, is_sprint_end_week
+from standard_tasks import rows_for_week, is_sprint_end_week, parse_sprint_length_weeks
 
 
 def check(name, got, exp):
@@ -36,6 +36,33 @@ check("summary absent off-week", "Summary report creation" in off, False)
 # --- sprint-end present again two weeks later (2026-07-26, friday 2026-07-31) ---
 nxt = by_name(rows_for_week(date(2026, 7, 26), date(2026, 8, 1), None, ANCHOR, PAST))
 check("sprint review +14", "Internal sprint review" in nxt, True)
+
+# --- cycle_days is a real parameter: a 3-week (21-day) sprint disagrees with
+# the default 14-day cycle on the +14 week, and agrees again on the +21 week ---
+check("14-day cycle flags +14 week", is_sprint_end_week(date(2026, 7, 26), ANCHOR), True)
+check("21-day cycle does NOT flag +14 week", is_sprint_end_week(date(2026, 7, 26), ANCHOR, cycle_days=21), False)
+check("21-day cycle flags +21 week", is_sprint_end_week(date(2026, 8, 2), ANCHOR, cycle_days=21), True)
+
+rows_21_plus14 = by_name(rows_for_week(date(2026, 7, 26), date(2026, 8, 1), None, ANCHOR, PAST, cycle_days=21))
+check("rows_for_week cycle_days=21: sprint review absent on +14 week",
+      "Internal sprint review" in rows_21_plus14, False)
+rows_21_plus21 = by_name(rows_for_week(date(2026, 8, 2), date(2026, 8, 8), None, ANCHOR, PAST, cycle_days=21))
+check("rows_for_week cycle_days=21: sprint review present on +21 week",
+      "Internal sprint review" in rows_21_plus21, True)
+
+# --- parse_sprint_length_weeks: WARN + default 2, never crash ---
+check("empty string -> default 2, no warning", parse_sprint_length_weeks(""), (2, None))
+check("whitespace -> default 2, no warning", parse_sprint_length_weeks("   "), (2, None))
+check("valid '3' -> (3, None)", parse_sprint_length_weeks("3"), (3, None))
+w_bad, warn_bad = parse_sprint_length_weeks("abc")
+check("invalid 'abc' -> weeks defaults to 2", w_bad, 2)
+check("invalid 'abc' -> warning present", warn_bad is not None, True)
+w_zero, warn_zero = parse_sprint_length_weeks("0")
+check("zero -> weeks defaults to 2", w_zero, 2)
+check("zero -> warning present", warn_zero is not None, True)
+w_neg, warn_neg = parse_sprint_length_weeks("-1")
+check("negative -> weeks defaults to 2", w_neg, 2)
+check("negative -> warning present", warn_neg is not None, True)
 
 # --- no anchor -> sprint-end tasks skipped, weekly ones stay ---
 noanchor = by_name(rows_for_week(date(2026, 7, 12), date(2026, 7, 18), None, None, PAST))

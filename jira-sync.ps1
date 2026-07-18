@@ -98,10 +98,10 @@ $lblConnStatus.Location = New-Object System.Drawing.Point(32,15)
 $lblConnStatus.Size = New-Object System.Drawing.Size(110,18)
 [void]$pnlTop.Controls.Add($lblConnStatus)
 
-$btnTest     = New-Btn $pnlTop '❓ Test'      150 6 74  34 70  70  85
-$btnSettings = New-Btn $pnlTop '⚙️ Settings'  230 6 100 34 70  70  85
-$btnRead     = New-Btn $pnlTop '👀 Read File' 336 6 120 34 40  100 140
-$btnOpen     = New-Btn $pnlTop '✏️ Open File' 462 6 120 34 40  110 60
+$btnTest     = New-Btn $pnlTop '? Test'      150 6 74  34 70  70  85
+$btnSettings = New-Btn $pnlTop 'Settings'    230 6 100 34 70  70  85
+$btnRead     = New-Btn $pnlTop 'Read File'   336 6 120 34 40  100 140
+$btnOpen     = New-Btn $pnlTop 'Open File'   462 6 120 34 40  110 60
 
 # Excel path lives in Settings only (persisted to .env as EXCEL_FILE). We keep
 # $txtFile as an off-screen holder so the rest of the UI (Read/Submit/Fill) can
@@ -116,10 +116,10 @@ $pnlBtns.Size = New-Object System.Drawing.Size(1060,52)
 $pnlBtns.BackColor = [System.Drawing.Color]::FromArgb(255,60,60,72)
 [void]$form.Controls.Add($pnlBtns)
 
-$btnFillStd = New-Btn $pnlBtns 'Standard ⬇️'         8   8 150 36 120 80  160
-$btnSync    = New-Btn $pnlBtns 'Jira ⬇️'             166 8 150 36 0   122 200
-$btnSubmit  = New-Btn $pnlBtns 'Submit tasks ➡️'      324 8 185 36 180 80  0
-$btnFill    = New-Btn $pnlBtns 'Fill days ⬆️⬆️⬆️⬆️⬆️' 517 8 220 36 80  80  80
+$btnFillStd = New-Btn $pnlBtns 'Standard ↓'         8   8 150 36 120 80  160
+$btnSync    = New-Btn $pnlBtns 'Jira ↓'             166 8 150 36 0   122 200
+$btnSubmit  = New-Btn $pnlBtns 'Submit tasks →'      324 8 185 36 180 80  0
+$btnFill    = New-Btn $pnlBtns 'Fill days ↑↑↑↑↑'    517 8 220 36 80  80  80
 $btnFill.Enabled = $false
 $btnFill.ForeColor = [System.Drawing.Color]::FromArgb(255,140,140,140)
 

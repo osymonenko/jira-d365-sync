@@ -28,4 +28,20 @@ resolved = q["investigation"].format(project="GT2", account_id="ACC", ws="2026-0
 assert resolved == "project = GT2 custom 2026-07-12", resolved
 print("  OK template substitutes {project}/{ws}")
 
+# 4. an entry with an unrecognized key is ignored — this is the contract the
+#    Settings GUI's custom (user-added) query slots rely on: they live in the
+#    same config/jql_queries.json file, keyed differently, and must never
+#    reach generate_week_rows or change what the six fixed keys resolve to.
+(cfgdir / "jql_queries.json").write_text(json.dumps({
+    "queries": [
+        {"key": "investigation", "label": "x", "jql": "project = {project} custom {ws}"},
+        {"key": "extra_ab12cd34", "label": "My custom query", "jql": "project = FOO"}
+    ]
+}), encoding="utf-8")
+q = js.load_jql()
+assert set(q) == {"investigation", "bug_verification", "story_creation",
+                  "functional_testing", "regression_testing", "other_qa"}, set(q)
+assert q["investigation"] == "project = {project} custom {ws}", q["investigation"]
+print("  OK unrecognized key ignored, six-key contract holds")
+
 print("ALL PASS")

@@ -218,12 +218,42 @@ $btnCopyLog.Add_Click({
 $script:monthCodes = @{}
 $script:weekCheckboxes = @()
 
+function Update-MasterCheckboxState {
+    if ($script:weekCheckboxes.Count -eq 0) { $chkWeeksAll.CheckState = 'Unchecked'; return }
+    $checkedCount = @($script:weekCheckboxes | Where-Object { $_.Checked }).Count
+    if ($checkedCount -eq 0) { $chkWeeksAll.CheckState = 'Unchecked' }
+    elseif ($checkedCount -eq $script:weekCheckboxes.Count) { $chkWeeksAll.CheckState = 'Checked' }
+    else { $chkWeeksAll.CheckState = 'Indeterminate' }
+}
+
+$chkWeeksAll.Add_Click({
+    # WinForms auto-cycles a ThreeState CheckBox's CheckState on click, in order
+    # Unchecked -> Checked -> Indeterminate -> Unchecked, BEFORE this handler runs.
+    # So by the time we read $chkWeeksAll.CheckState here, it already reflects the
+    # post-click auto-cycled value:
+    #   prior Unchecked    -> now Checked        -> already means "select all", keep it
+    #   prior Checked      -> now Indeterminate  -> override to mean "deselect all"
+    #   prior Indeterminate -> now Unchecked     -> override to mean "select all"
+    #                          (a real click never leaves the box on Indeterminate;
+    #                          only Update-MasterCheckboxState's recompute does that)
+    if ($chkWeeksAll.CheckState -eq 'Indeterminate') {
+        foreach ($c in $script:weekCheckboxes) { $c.Checked = $false }
+        $chkWeeksAll.CheckState = 'Unchecked'
+    } else {
+        foreach ($c in $script:weekCheckboxes) { $c.Checked = $true }
+        $chkWeeksAll.CheckState = 'Checked'
+    }
+})
+
 function Populate-Weeks($weeksJson) {
     $toRemove = @($pnlWeeksList.Controls | Where-Object { $_ -is [System.Windows.Forms.CheckBox] })
     foreach ($c in $toRemove) { $pnlWeeksList.Controls.Remove($c) }
     $script:weekCheckboxes = @()
     $chkWeeksAll.Visible = $false
-    if (-not $weeksJson -or $weeksJson.Count -eq 0) { return }
+    if (-not $weeksJson -or $weeksJson.Count -eq 0) {
+        $chkWeeksAll.CheckState = 'Unchecked'
+        return
+    }
 
     # Rebuild month dropdown from the months each week touches (start + end).
     $cmbMonth.Items.Clear()
@@ -250,11 +280,13 @@ function Populate-Weeks($weeksJson) {
         $chk.Checked = $true
         $chk.Font = New-Object System.Drawing.Font('Segoe UI',8.5)
         $chk.Tag = $w.start
+        $chk.Add_CheckedChanged({ Update-MasterCheckboxState })
         [void]$pnlWeeksList.Controls.Add($chk)
         $script:weekCheckboxes += $chk
         $i++
     }
     $chkWeeksAll.Visible = $true
+    Update-MasterCheckboxState
 }
 
 # ---- Divider ---------------------------------------------------------------

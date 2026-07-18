@@ -7,6 +7,11 @@ from datetime import date, timedelta
 
 from month_filter import clamp_week_to_month
 
+import json
+import pathlib
+
+_CONFIG_DIR = pathlib.Path(__file__).resolve().parent.parent / "config"
+
 # Excel day columns (Mon=D .. Fri=H). The first hours column is Monday.
 DAY_COL = {"Mon": 4, "Tue": 5, "Wed": 6, "Thu": 7, "Fri": 8}
 # Offset in days from the Sunday week_start stored in Excel.
@@ -30,6 +35,24 @@ QA_PLACEHOLDERS = [
 ]
 
 
+def load_schedule():
+    """Return (schedule, placeholders) from config/standard_tasks.json, or the
+    built-in defaults if the file is missing or invalid."""
+    path = _CONFIG_DIR / "standard_tasks.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        schedule = data["schedule"]
+        placeholders = data["placeholders"]
+        if not isinstance(schedule, list) or not isinstance(placeholders, list):
+            raise ValueError("schedule/placeholders must be lists")
+        return schedule, placeholders
+    except FileNotFoundError:
+        return SCHEDULE, QA_PLACEHOLDERS
+    except Exception as e:
+        print(f"[WARN] Invalid config/standard_tasks.json ({e}); using defaults", flush=True)
+        return SCHEDULE, QA_PLACEHOLDERS
+
+
 def _friday(week_start: date) -> date:
     return week_start + timedelta(days=DAY_OFFSET["Fri"])
 
@@ -40,13 +63,18 @@ def is_sprint_end_week(week_start: date, sprint_anchor: date) -> bool:
     return (_friday(week_start) - sprint_anchor).days % 14 == 0
 
 
-def rows_for_week(week_start, week_end, month, sprint_anchor, today):
+def rows_for_week(week_start, week_end, month, sprint_anchor, today,
+                  schedule=None, placeholders=None):
     """Standard task rows for one week block.
 
     Returns list of {"name": str, "hours_by_col": {col: hours}}.
     QA placeholders have an empty hours_by_col. Returns [] if the week is
     entirely outside the selected month.
     """
+    if schedule is None:
+        schedule = SCHEDULE
+    if placeholders is None:
+        placeholders = QA_PLACEHOLDERS
     if month:
         clamped = clamp_week_to_month(week_start, week_end, month)
         if clamped is None:
@@ -56,7 +84,7 @@ def rows_for_week(week_start, week_end, month, sprint_anchor, today):
         win_start, win_end = week_start, week_end
 
     rows = []
-    for task in SCHEDULE:
+    for task in schedule:
         if task["freq"] == "sprint-end":
             if sprint_anchor is None or not is_sprint_end_week(week_start, sprint_anchor):
                 continue
@@ -70,7 +98,7 @@ def rows_for_week(week_start, week_end, month, sprint_anchor, today):
 
     # QA placeholders only when the week still has a future work day.
     if _friday(week_start) > today:
-        for name in QA_PLACEHOLDERS:
+        for name in placeholders:
             rows.append({"name": name, "hours_by_col": {}})
 
     return rows

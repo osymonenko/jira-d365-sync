@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from month_filter import clamp_week_to_month, month_bounds
-from standard_tasks import rows_for_week, DAY_COL
+from standard_tasks import rows_for_week, DAY_COL, load_schedule
 
 # Reverse of DAY_COL (column index -> day name) for human-readable logging.
 _COL_DAY = {col: day for day, col in DAY_COL.items()}
@@ -646,12 +646,14 @@ def cmd_fill_standard(args):
             print("[ERROR] None of the specified weeks found in Excel", flush=True)
             sys.exit(1)
 
+    schedule, placeholders = load_schedule()
     today = date.today()
     insertions = {}
     for week in weeks_info:
         ws_key = fmt(week["week_start"])
         we = week["week_end"] or (week["week_start"] + timedelta(days=6))
-        rows = rows_for_week(week["week_start"], we, args.month, sprint_anchor, today)
+        rows = rows_for_week(week["week_start"], we, args.month, sprint_anchor, today,
+                             schedule=schedule, placeholders=placeholders)
         if not rows:
             print(f"[SKIP] {ws_key}: no standard rows for this week", flush=True)
             continue

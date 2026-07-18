@@ -8,6 +8,7 @@ coverage/
 
 # Excel timesheets — contain real time-tracking data, never commit
 data/
+config/
 
 # Playwright / test artifacts
 .playwright-mcp/

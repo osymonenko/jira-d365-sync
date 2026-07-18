@@ -161,7 +161,9 @@ Find the block starting at `$panelJql = New-Object System.Windows.Forms.Panel` (
 
 Note: `$row.Tag = $slot.key` is new (the original code had no per-row tag). It doesn't change any existing behavior — it's read by Task 3's Save logic to tell fixed rows apart from custom ones by inspecting every row in `$panelJqlFlow.Controls` uniformly.
 
-The `$btnCopy.Add_Click` body is copied verbatim from the original — same `$this.Tag` + `$script:jqlBoxes[$key]` lookup pattern (proven safe in Phase 1's review: it avoids PowerShell's shared-loop-variable closure bug). Do not "simplify" it to close over `$box`/`$slot` directly even though this is now inside a function (where that would also be safe) — keep the diff minimal and match the already-reviewed pattern.
+The `$btnCopy.Add_Click` body is copied verbatim from the original — same `$this.Tag` + `$script:jqlBoxes[$key]` lookup pattern. Do not "simplify" it to close over `$box`/`$slot` directly.
+
+> **Post-merge correction:** an earlier version of this note claimed closing directly over a function's local variables (`$box`/`$slot`) would "also be safe" here because each call is its own function invocation. **That is wrong**, and it caused a real, shipped bug in Task 3 (fixed in commit `d6a6fa9` after the whole-branch review caught it empirically). PowerShell `{...}` scriptblocks do not snapshot a defining function's locals — they resolve free variables against the *live scope chain at invocation time* (unless created with `.GetNewClosure()`). `$this.Tag`/`$script:jqlBoxes[$key]` work because they never depend on a function having *not yet returned*: `$this` is a real .NET property on the clicked control, and `$script:jqlBoxes` is script-scope, so both exist regardless of when the button is actually clicked. `$tProj`/`$tAcct` (locals of `Show-Settings` itself) work for a *different* reason: `Show-Settings` is still executing — blocked inside `$dlg.ShowDialog(...)` — for as long as the dialog is open, so its scope genuinely never "returns" while a click can happen. A helper function like `New-JqlFixedRow`/`New-JqlCustomRow` has no such guarantee: it returns immediately after building its row, long before the dialog is shown, so its locals are gone by click time. **Rule of thumb:** in a WinForms `Add_Click` handler, only rely on `$this`, script-scope (`$script:...`) variables, or locals of a function that is provably still on the call stack (blocked in a modal `ShowDialog`) for the handler's entire lifetime — never a helper function's own locals.
 
 - [ ] **Step 2: Verify parse**
 
@@ -257,7 +259,9 @@ Immediately after the `foreach ($slot in $jqlSlots) { New-JqlFixedRow $slot }` l
     }
 ```
 
-`New-JqlCustomRow`'s `Add_Click` handlers close directly over `$box`/`$row` (not via `$this.Tag`) — this is safe here because each call to `New-JqlCustomRow` is its own function invocation with its own local scope (unlike a bare `foreach` loop body, which shares one scope across iterations and would need the `$this.Tag` indirection Task 2 kept for the fixed rows).
+`New-JqlCustomRow`'s `Add_Click` handlers close directly over `$box`/`$row`.
+
+> **Post-merge correction:** this was originally written as "safe here because each call to `New-JqlCustomRow` is its own function invocation with its own local scope" — it is not. As shipped, this caused both the Copy and Delete buttons on every custom row to silently do nothing (Copy read an empty string; Delete removed nothing), because `New-JqlCustomRow` returns before `Show-Settings` shows the dialog, so `$box`/`$row` no longer exist on the scope chain by the time a user clicks. The fix (commit `d6a6fa9`) resolves both through the live control tree instead: the Copy handler reads `$this.Parent.Controls[1].Text` and the Delete handler calls `$this.Parent.Parent.Controls.Remove($this.Parent)` (`$this` = the clicked button, `.Parent` = its row `Panel`, `.Parent.Parent` = `$panelJqlFlow`). See the corresponding note in Task 2 above for the general rule. If you're implementing something similar from this plan, use `$this`/control-tree navigation from the start — do not close over a builder function's locals.
 
 - [ ] **Step 2: Add the "+ Add query" button above the row list**
 

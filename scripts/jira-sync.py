@@ -459,6 +459,9 @@ def _write_check_sum(ws, row: int, first_task_row: int, last_task_row: int) -> N
         fill=PatternFill("solid", fgColor=_PASTEL_RED), font=Font(color=_BLACK)))
 
 
+_DAY_RANGE_RE = re.compile(r"^D(\d+):H\1$")
+
+
 def _reconcile_check_sums(ws) -> None:
     """Rewrite every existing check-sum row's SUM formulas to match its block's
     CURRENT physical task rows.
@@ -471,7 +474,22 @@ def _reconcile_check_sums(ws) -> None:
     never rewrites formula text, so the old absolute row numbers stay literal
     and silently start summing whatever now occupies those rows (usually the
     week above). Re-deriving every check-sum row from a fresh find_weeks() scan
-    at the end of a run keeps them all honest regardless of what moved them."""
+    at the end of a run keeps them all honest regardless of what moved them.
+
+    Row insertion also leaves the check-sum row's OWN conditional-formatting
+    entry behind at its pre-shift range (sqref strings aren't shifted by
+    insert_rows either) — so after a shift, the row that used to host a
+    check-sum keeps its red/green coloring even though it's now an ordinary
+    task row (or blank). Drop any "D<n>:H<n>"-shaped rule whose row isn't a
+    current check-sum row before re-adding fresh ones for the rows that are.
+    """
+    current_check_rows = {w["check_sum_row"] for w in find_weeks(ws) if w["check_sum_row"] is not None}
+    for cf in list(ws.conditional_formatting):
+        sqref = str(cf.sqref)
+        m = _DAY_RANGE_RE.match(sqref)
+        if m and int(m.group(1)) not in current_check_rows:
+            del ws.conditional_formatting[sqref]
+
     for week in find_weeks(ws):
         check_row = week["check_sum_row"]
         if check_row is None:

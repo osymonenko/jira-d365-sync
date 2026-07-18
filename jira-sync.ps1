@@ -342,6 +342,73 @@ function Show-Settings {
     $tabJql.BackColor  = [System.Drawing.Color]::White
     $tabs.TabPages.AddRange(@($tabConn, $tabStd, $tabJql))
 
+    $jqlSlots = @(
+        @{ key='investigation';      label='1. Investigation issues' },
+        @{ key='bug_verification';   label='2. Bug verification' },
+        @{ key='story_creation';     label='3. User story creation' },
+        @{ key='functional_testing'; label='4. Functional testing' },
+        @{ key='regression_testing'; label='5. Regression testing' },
+        @{ key='other_qa';           label='6. Other QA activities' }
+    )
+    $defaultJql = @{
+        investigation      = 'project = {project} AND issuetype = Bug AND created >= "{ws}" AND created <= "{we}" AND (creator = {account_id} OR reporter = {account_id}) ORDER BY priority DESC, issuetype ASC, key ASC'
+        bug_verification   = 'project = {project} AND issuetype = Bug AND status CHANGED TO "Done" BY {account_id} DURING ("{ws}","{we}") ORDER BY priority DESC, issuetype ASC, key ASC'
+        story_creation     = 'project = {project} AND issuetype = Story AND created >= "{ws}" AND created <= "{we}" AND creator = {account_id} AND parent = {project}-80 ORDER BY status DESC, issuetype ASC, key ASC'
+        functional_testing = 'project = {project} AND issuetype = Story AND (status CHANGED FROM "Ready for QA" BY {account_id} DURING ("{ws}", "{we}") OR status CHANGED FROM "IN QA" BY {account_id} DURING ("{ws}", "{we}")) ORDER BY key ASC'
+        regression_testing = 'project = {project} AND status CHANGED TO Done BY {account_id} DURING ("{ws}", "{we}") AND parent = {project}-73 AND summary ~ "Regression" ORDER BY status DESC, issuetype ASC, key ASC'
+        other_qa           = 'project = {project} AND status CHANGED TO Done BY {account_id} DURING ("{ws}", "{we}") AND parent = {project}-73 AND summary !~ "Smoke" AND summary !~ "Regression" AND summary !~ "Functional." ORDER BY status DESC, issuetype ASC, key ASC'
+    }
+    $jqlCfg = Read-JsonConfig 'jql_queries.json'
+    $jqlValues = @{}
+    foreach ($k in $defaultJql.Keys) { $jqlValues[$k] = $defaultJql[$k] }
+    if ($jqlCfg -and $jqlCfg.queries) {
+        foreach ($q in $jqlCfg.queries) { if ($jqlValues.ContainsKey($q.key) -and $q.jql) { $jqlValues[$q.key] = $q.jql } }
+    }
+
+    $panelJql = New-Object System.Windows.Forms.Panel
+    $panelJql.Location = New-Object System.Drawing.Point(0,0)
+    $panelJql.Dock = 'Fill'; $panelJql.AutoScroll = $true
+    [void]$tabJql.Controls.Add($panelJql)
+
+    $script:jqlBoxes = @{}
+    $y = 8
+    foreach ($slot in $jqlSlots) {
+        $lbl = New-Object System.Windows.Forms.Label
+        $lbl.Text = $slot.label; $lbl.Location = New-Object System.Drawing.Point(8,$y)
+        $lbl.Size = New-Object System.Drawing.Size(400,16); $lbl.Font = New-Object System.Drawing.Font('Segoe UI',9,[System.Drawing.FontStyle]::Bold)
+        [void]$panelJql.Controls.Add($lbl)
+        $box = New-Object System.Windows.Forms.TextBox
+        $box.Multiline = $true; $box.ScrollBars = 'Vertical'; $box.WordWrap = $true
+        $box.Location = New-Object System.Drawing.Point(8,($y+18)); $box.Size = New-Object System.Drawing.Size(490,46)
+        $box.Font = New-Object System.Drawing.Font('Consolas',8)
+        $box.Text = [string]$jqlValues[$slot.key]
+        [void]$panelJql.Controls.Add($box)
+        $script:jqlBoxes[$slot.key] = $box
+
+        $btnCopy = New-Object System.Windows.Forms.Button
+        $btnCopy.Text = 'Copy'; $btnCopy.Location = New-Object System.Drawing.Point(502,($y+18)); $btnCopy.Size = New-Object System.Drawing.Size(64,46)
+        $btnCopy.FlatStyle = 'Flat'; $btnCopy.Tag = $slot.key
+        $btnCopy.Add_Click({
+            $key = $this.Tag
+            $tpl = [string]$script:jqlBoxes[$key].Text
+            $proj = if ($tProj.Text) { $tProj.Text } else { 'GT2' }
+            $acct = $tAcct.Text
+            $checked = @($script:weekCheckboxes | Where-Object { $_.Checked } | ForEach-Object { $_.Tag })
+            if ($checked.Count -gt 0) {
+                $ws = [string]$checked[0]
+                $we = ([datetime]::ParseExact($ws,'yyyy-MM-dd',$null).AddDays(6)).ToString('yyyy-MM-dd')
+            } else {
+                $today = Get-Date
+                $sunday = $today.AddDays(-[int]$today.DayOfWeek)
+                $ws = $sunday.ToString('yyyy-MM-dd'); $we = $sunday.AddDays(6).ToString('yyyy-MM-dd')
+            }
+            $resolved = $tpl.Replace('{project}',$proj).Replace('{account_id}',$acct).Replace('{ws}',$ws).Replace('{we}',$we)
+            [System.Windows.Forms.Clipboard]::SetText($resolved)
+        })
+        [void]$panelJql.Controls.Add($btnCopy)
+        $y += 74
+    }
+
     $gridStd = New-Object System.Windows.Forms.DataGridView
     $gridStd.Location = New-Object System.Drawing.Point(8,8)
     $gridStd.Size = New-Object System.Drawing.Size(572,350)
@@ -408,6 +475,14 @@ function Show-Settings {
             $sched += @{ name=$name.Trim(); hours=$hours; days=$days; freq=$(if ($freq) { $freq } else { 'weekly' }) }
         }
         Write-JsonConfig 'standard_tasks.json' @{ schedule=$sched; placeholders=$ph }
+    }
+
+    $script:SaveJqlConfig = {
+        $queries = @()
+        foreach ($slot in $jqlSlots) {
+            $queries += @{ key=$slot.key; label=$slot.label; jql=[string]$script:jqlBoxes[$slot.key].Text }
+        }
+        Write-JsonConfig 'jql_queries.json' @{ queries=$queries }
     }
 
     function Add-Row($parent, $label, $y, $pw = $false) {
@@ -528,6 +603,7 @@ function Show-Settings {
     $btnSv.Add_Click({
         Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text
         & $script:SaveStandardFromGrid
+        & $script:SaveJqlConfig
         $txtFile.Text = $tExcel.Text
     })
     [void]$dlg.Controls.Add($btnSv)

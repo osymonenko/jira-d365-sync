@@ -444,7 +444,7 @@ function Show-Settings {
         $btnCopy.Text = 'Copy'; $btnCopy.Location = New-Object System.Drawing.Point(424,20); $btnCopy.Size = New-Object System.Drawing.Size(60,21)
         $btnCopy.FlatStyle = 'Flat'
         $btnCopy.Add_Click({
-            $tpl = [string]$box.Text
+            $tpl = [string]$this.Parent.Controls[1].Text
             $proj = if ($tProj.Text) { $tProj.Text } else { 'GT2' }
             $acct = $tAcct.Text
             $checked = @($script:weekCheckboxes | Where-Object { $_.Checked } | ForEach-Object { $_.Tag })
@@ -465,7 +465,7 @@ function Show-Settings {
         $btnDel.Text = 'Delete'; $btnDel.Location = New-Object System.Drawing.Point(424,44); $btnDel.Size = New-Object System.Drawing.Size(60,20)
         $btnDel.FlatStyle = 'Flat'; $btnDel.ForeColor = [System.Drawing.Color]::FromArgb(255,180,40,40)
         $btnDel.Add_Click({
-            $panelJqlFlow.Controls.Remove($row)
+            $this.Parent.Parent.Controls.Remove($this.Parent)
         })
         [void]$row.Controls.Add($btnDel)
 

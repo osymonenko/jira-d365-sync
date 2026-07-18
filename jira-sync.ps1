@@ -126,145 +126,64 @@ $btnFill.ForeColor = [System.Drawing.Color]::FromArgb(255,140,140,140)
 $btnStop = New-Btn $pnlBtns '⛔' 1024 8 22 36 140 30 30
 $btnStop.Enabled = $false
 
-# ---- Weeks strip (compact, checkbox-only) ----------------------------------
-$pnlWeeks = New-Object System.Windows.Forms.Panel
-$pnlWeeks.Location = New-Object System.Drawing.Point(0,98)
-$pnlWeeks.Size = New-Object System.Drawing.Size(1060,40)
-$pnlWeeks.BackColor = [System.Drawing.Color]::White
-[void]$form.Controls.Add($pnlWeeks)
+# ---- Right-side Weeks sidebar (fixed width, full remaining height) ---------
+$pnlWeeksSidebar = New-Object System.Windows.Forms.Panel
+$pnlWeeksSidebar.Location = New-Object System.Drawing.Point(800,128)
+$pnlWeeksSidebar.Size = New-Object System.Drawing.Size(260,524)
+$pnlWeeksSidebar.BackColor = [System.Drawing.Color]::White
+[void]$form.Controls.Add($pnlWeeksSidebar)
 
-$lblWeeksTitle = New-Object System.Windows.Forms.Label
-$lblWeeksTitle.Text = 'Weeks:'
-$lblWeeksTitle.Font = New-Object System.Drawing.Font('Segoe UI',9)
-$lblWeeksTitle.Location = New-Object System.Drawing.Point(8,12)
-$lblWeeksTitle.Size = New-Object System.Drawing.Size(48,18)
-$lblWeeksTitle.ForeColor = [System.Drawing.Color]::FromArgb(255,80,80,100)
-[void]$pnlWeeks.Controls.Add($lblWeeksTitle)
+$pnlWeeksList = New-Object System.Windows.Forms.Panel
+$pnlWeeksList.Dock = 'Fill'
+$pnlWeeksList.AutoScroll = $true
+$pnlWeeksList.BackColor = [System.Drawing.Color]::White
 
-$lnkSelectAll = New-Object System.Windows.Forms.LinkLabel
-$lnkSelectAll.Text = 'All'
-$lnkSelectAll.Location = New-Object System.Drawing.Point(58,12)
-$lnkSelectAll.Size = New-Object System.Drawing.Size(22,18)
-$lnkSelectAll.Font = New-Object System.Drawing.Font('Segoe UI',9)
-$lnkSelectAll.Visible = $false
-[void]$pnlWeeks.Controls.Add($lnkSelectAll)
-
-$lnkNone = New-Object System.Windows.Forms.LinkLabel
-$lnkNone.Text = 'None'
-$lnkNone.Location = New-Object System.Drawing.Point(82,12)
-$lnkNone.Size = New-Object System.Drawing.Size(34,18)
-$lnkNone.Font = New-Object System.Drawing.Font('Segoe UI',9)
-$lnkNone.Visible = $false
-[void]$pnlWeeks.Controls.Add($lnkNone)
+$pnlWeeksTop = New-Object System.Windows.Forms.Panel
+$pnlWeeksTop.Dock = 'Top'; $pnlWeeksTop.Height = 64
+$pnlWeeksTop.BackColor = [System.Drawing.Color]::White
 
 $lblMonth = New-Object System.Windows.Forms.Label
 $lblMonth.Text = 'Month:'
-$lblMonth.Location = New-Object System.Drawing.Point(122,13)
+$lblMonth.Location = New-Object System.Drawing.Point(6,8)
 $lblMonth.Size = New-Object System.Drawing.Size(44,18)
 $lblMonth.Font = New-Object System.Drawing.Font('Segoe UI',9)
 $lblMonth.ForeColor = [System.Drawing.Color]::FromArgb(255,80,80,100)
-[void]$pnlWeeks.Controls.Add($lblMonth)
+[void]$pnlWeeksTop.Controls.Add($lblMonth)
 
 $cmbMonth = New-Object System.Windows.Forms.ComboBox
-$cmbMonth.Location = New-Object System.Drawing.Point(166,10)
-$cmbMonth.Size = New-Object System.Drawing.Size(128,22)
+$cmbMonth.Location = New-Object System.Drawing.Point(54,6)
+$cmbMonth.Size = New-Object System.Drawing.Size(190,22)
 $cmbMonth.DropDownStyle = 'DropDownList'
 $cmbMonth.Font = New-Object System.Drawing.Font('Segoe UI',9)
 [void]$cmbMonth.Items.Add('All')
 $cmbMonth.SelectedIndex = 0
-[void]$pnlWeeks.Controls.Add($cmbMonth)
+[void]$pnlWeeksTop.Controls.Add($cmbMonth)
 
-$script:monthCodes = @{}
+$chkWeeksAll = New-Object System.Windows.Forms.CheckBox
+$chkWeeksAll.Text = 'Select all'
+$chkWeeksAll.ThreeState = $true
+$chkWeeksAll.Location = New-Object System.Drawing.Point(6,34)
+$chkWeeksAll.Size = New-Object System.Drawing.Size(244,20)
+$chkWeeksAll.Font = New-Object System.Drawing.Font('Segoe UI',9,[System.Drawing.FontStyle]::Bold)
+$chkWeeksAll.Visible = $false
+[void]$pnlWeeksTop.Controls.Add($chkWeeksAll)
 
-$script:weekCheckboxes = @()
+$pnlWeeksBottom = New-Object System.Windows.Forms.Panel
+$pnlWeeksBottom.Dock = 'Bottom'; $pnlWeeksBottom.Height = 64
+$pnlWeeksBottom.BackColor = [System.Drawing.Color]::White
 
-function Populate-Weeks($weeksJson) {
-    $toRemove = @($pnlWeeks.Controls | Where-Object { $_ -is [System.Windows.Forms.CheckBox] })
-    foreach ($c in $toRemove) { $pnlWeeks.Controls.Remove($c) }
-    $script:weekCheckboxes = @()
-    $lnkSelectAll.Visible = $false; $lnkNone.Visible = $false
-    if (-not $weeksJson -or $weeksJson.Count -eq 0) { return }
-
-    # Rebuild month dropdown from the months each week touches (start + end).
-    $cmbMonth.Items.Clear()
-    [void]$cmbMonth.Items.Add('All')
-    $script:monthCodes = @{}
-    $codes = New-Object 'System.Collections.Generic.SortedSet[string]'
-    foreach ($w in $weeksJson) {
-        [void]$codes.Add($w.start.Substring(0,7))
-        [void]$codes.Add($w.end.Substring(0,7))
-    }
-    foreach ($code in $codes) {
-        $display = [datetime]::ParseExact("$code-01",'yyyy-MM-dd',$null).ToString('MMMM yyyy',[System.Globalization.CultureInfo]::InvariantCulture)
-        $script:monthCodes[$display] = $code
-        [void]$cmbMonth.Items.Add($display)
-    }
-    $cmbMonth.SelectedIndex = 0
-
-    # Lay out checkboxes in rows of 5; increase panel height per extra row
-    $colW = 142; $startX = 306; $cols = [Math]::Floor((1060 - $startX) / $colW)
-    $rowsNeeded = [Math]::Ceiling($weeksJson.Count / $cols)
-    $panelH = 40 + ([Math]::Max($rowsNeeded - 1, 0) * 22)
-    $pnlWeeks.Height = $panelH
-    $divider.Top    = 98 + $panelH
-    $pnlStatus.Top  = 98 + $panelH + 1
-    $txtLog.Top     = 98 + $panelH + 29
-    $txtLog.Height  = [Math]::Max($form.ClientSize.Height - $txtLog.Top, 50)
-
-    $i = 0
-    foreach ($w in $weeksJson) {
-        $col = $i % $cols
-        $row = [Math]::Floor($i / $cols)
-        $chk = New-Object System.Windows.Forms.CheckBox
-        $chk.Text = $w.start.Substring(5) + ' – ' + $w.end.Substring(5)
-        $chk.Location = New-Object System.Drawing.Point(($startX + $col * $colW), (11 + $row * 22))
-        $chk.Size = New-Object System.Drawing.Size($colW, 18)
-        $chk.Checked = $true
-        $chk.Font = New-Object System.Drawing.Font('Segoe UI',8.5)
-        $chk.Tag = $w.start
-        [void]$pnlWeeks.Controls.Add($chk)
-        $script:weekCheckboxes += $chk
-        $i++
-    }
-    $lnkSelectAll.Visible = $true; $lnkNone.Visible = $true
-}
-
-$lnkSelectAll.Add_LinkClicked({ foreach ($c in $script:weekCheckboxes) { $c.Checked = $true } })
-$lnkNone.Add_LinkClicked({      foreach ($c in $script:weekCheckboxes) { $c.Checked = $false } })
-
-# ---- Divider ---------------------------------------------------------------
-$divider = New-Object System.Windows.Forms.Label
-$divider.Location = New-Object System.Drawing.Point(0,138)
-$divider.Size = New-Object System.Drawing.Size(1060,1)
-$divider.BackColor = [System.Drawing.Color]::FromArgb(255,200,200,210)
-[void]$form.Controls.Add($divider)
-
-# ---- Status bar ------------------------------------------------------------
-$pnlStatus = New-Object System.Windows.Forms.Panel
-$pnlStatus.Location = New-Object System.Drawing.Point(0,139)
-$pnlStatus.Size = New-Object System.Drawing.Size(1060,28)
-$pnlStatus.BackColor = [System.Drawing.Color]::FromArgb(255,235,235,240)
-[void]$form.Controls.Add($pnlStatus)
-
-$lblStatusDot = New-Object System.Windows.Forms.Label
-$lblStatusDot.Text = 'l'
-$lblStatusDot.Font = New-Object System.Drawing.Font('Segoe UI',16,[System.Drawing.FontStyle]::Bold)
-$lblStatusDot.Location = New-Object System.Drawing.Point(8,-4)
-$lblStatusDot.Size = New-Object System.Drawing.Size(20,30)
-$lblStatusDot.ForeColor = [System.Drawing.Color]::LimeGreen
-[void]$pnlStatus.Controls.Add($lblStatusDot)
-
-$lblStatus = New-Object System.Windows.Forms.Label
-$lblStatus.Text = 'Ready'
-$lblStatus.Location = New-Object System.Drawing.Point(30,6)
-$lblStatus.Size = New-Object System.Drawing.Size(710,18)
-$lblStatus.Font = New-Object System.Drawing.Font('Segoe UI',9)
-[void]$pnlStatus.Controls.Add($lblStatus)
+$lblWeeksSummary = New-Object System.Windows.Forms.Label
+$lblWeeksSummary.Text = ''
+$lblWeeksSummary.Location = New-Object System.Drawing.Point(6,6)
+$lblWeeksSummary.Size = New-Object System.Drawing.Size(244,20)
+$lblWeeksSummary.Font = New-Object System.Drawing.Font('Segoe UI',8.5)
+$lblWeeksSummary.ForeColor = [System.Drawing.Color]::FromArgb(255,80,80,100)
+[void]$pnlWeeksBottom.Controls.Add($lblWeeksSummary)
 
 $btnCopyLog = New-Object System.Windows.Forms.Button
 $btnCopyLog.Text = 'Copy log'
-$btnCopyLog.Location = New-Object System.Drawing.Point(728, 3)
-$btnCopyLog.Size = New-Object System.Drawing.Size(164, 22)
+$btnCopyLog.Location = New-Object System.Drawing.Point(6,32)
+$btnCopyLog.Size = New-Object System.Drawing.Size(244,24)
 $btnCopyLog.FlatStyle = 'Flat'
 $btnCopyLog.FlatAppearance.BorderSize = 1
 $btnCopyLog.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(255,200,200,210)
@@ -287,12 +206,90 @@ $btnCopyLog.Add_Click({
     })
     $script:copyLogTimer.Start()
 })
-[void]$pnlStatus.Controls.Add($btnCopyLog)
+[void]$pnlWeeksBottom.Controls.Add($btnCopyLog)
+
+# Add order matters: Fill panel first, then Top/Bottom strips after — each
+# claims its own edge without covering the Fill panel (same pattern already
+# proven safe for the Jira-queries tab's FlowLayoutPanel + add-strip).
+[void]$pnlWeeksSidebar.Controls.Add($pnlWeeksList)
+[void]$pnlWeeksSidebar.Controls.Add($pnlWeeksTop)
+[void]$pnlWeeksSidebar.Controls.Add($pnlWeeksBottom)
+
+$script:monthCodes = @{}
+$script:weekCheckboxes = @()
+
+function Populate-Weeks($weeksJson) {
+    $toRemove = @($pnlWeeksList.Controls | Where-Object { $_ -is [System.Windows.Forms.CheckBox] })
+    foreach ($c in $toRemove) { $pnlWeeksList.Controls.Remove($c) }
+    $script:weekCheckboxes = @()
+    $chkWeeksAll.Visible = $false
+    if (-not $weeksJson -or $weeksJson.Count -eq 0) { return }
+
+    # Rebuild month dropdown from the months each week touches (start + end).
+    $cmbMonth.Items.Clear()
+    [void]$cmbMonth.Items.Add('All')
+    $script:monthCodes = @{}
+    $codes = New-Object 'System.Collections.Generic.SortedSet[string]'
+    foreach ($w in $weeksJson) {
+        [void]$codes.Add($w.start.Substring(0,7))
+        [void]$codes.Add($w.end.Substring(0,7))
+    }
+    foreach ($code in $codes) {
+        $display = [datetime]::ParseExact("$code-01",'yyyy-MM-dd',$null).ToString('MMMM yyyy',[System.Globalization.CultureInfo]::InvariantCulture)
+        $script:monthCodes[$display] = $code
+        [void]$cmbMonth.Items.Add($display)
+    }
+    $cmbMonth.SelectedIndex = 0
+
+    $i = 0
+    foreach ($w in $weeksJson) {
+        $chk = New-Object System.Windows.Forms.CheckBox
+        $chk.Text = $w.start.Substring(5) + ' – ' + $w.end.Substring(5)
+        $chk.Location = New-Object System.Drawing.Point(6, (4 + $i * 24))
+        $chk.Size = New-Object System.Drawing.Size(230, 20)
+        $chk.Checked = $true
+        $chk.Font = New-Object System.Drawing.Font('Segoe UI',8.5)
+        $chk.Tag = $w.start
+        [void]$pnlWeeksList.Controls.Add($chk)
+        $script:weekCheckboxes += $chk
+        $i++
+    }
+    $chkWeeksAll.Visible = $true
+}
+
+# ---- Divider ---------------------------------------------------------------
+$divider = New-Object System.Windows.Forms.Label
+$divider.Location = New-Object System.Drawing.Point(0,98)
+$divider.Size = New-Object System.Drawing.Size(1060,1)
+$divider.BackColor = [System.Drawing.Color]::FromArgb(255,200,200,210)
+[void]$form.Controls.Add($divider)
+
+# ---- Status bar ------------------------------------------------------------
+$pnlStatus = New-Object System.Windows.Forms.Panel
+$pnlStatus.Location = New-Object System.Drawing.Point(0,99)
+$pnlStatus.Size = New-Object System.Drawing.Size(1060,28)
+$pnlStatus.BackColor = [System.Drawing.Color]::FromArgb(255,235,235,240)
+[void]$form.Controls.Add($pnlStatus)
+
+$lblStatusDot = New-Object System.Windows.Forms.Label
+$lblStatusDot.Text = 'l'
+$lblStatusDot.Font = New-Object System.Drawing.Font('Segoe UI',16,[System.Drawing.FontStyle]::Bold)
+$lblStatusDot.Location = New-Object System.Drawing.Point(8,-4)
+$lblStatusDot.Size = New-Object System.Drawing.Size(20,30)
+$lblStatusDot.ForeColor = [System.Drawing.Color]::LimeGreen
+[void]$pnlStatus.Controls.Add($lblStatusDot)
+
+$lblStatus = New-Object System.Windows.Forms.Label
+$lblStatus.Text = 'Ready'
+$lblStatus.Location = New-Object System.Drawing.Point(30,6)
+$lblStatus.Size = New-Object System.Drawing.Size(1020,18)
+$lblStatus.Font = New-Object System.Drawing.Font('Segoe UI',9)
+[void]$pnlStatus.Controls.Add($lblStatus)
 
 # ---- Log -------------------------------------------------------------------
 $txtLog = New-Object System.Windows.Forms.RichTextBox
-$txtLog.Location = New-Object System.Drawing.Point(0,167)
-$txtLog.Size = New-Object System.Drawing.Size(1060,472)
+$txtLog.Location = New-Object System.Drawing.Point(0,128)
+$txtLog.Size = New-Object System.Drawing.Size(800,524)
 $txtLog.ReadOnly = $true
 $txtLog.BackColor = [System.Drawing.Color]::FromArgb(255,20,20,26)
 $txtLog.ForeColor = [System.Drawing.Color]::FromArgb(255,200,200,200)
@@ -303,7 +300,9 @@ $txtLog.ScrollBars = 'Vertical'
 
 $form.Add_Resize({
     $h = $form.ClientSize.Height
-    $txtLog.Height = [Math]::Max($h - $txtLog.Top, 50)
+    $newHeight = [Math]::Max($h - $txtLog.Top, 50)
+    $txtLog.Height = $newHeight
+    $pnlWeeksSidebar.Height = $newHeight
 })
 
 # ============================================================
@@ -845,6 +844,7 @@ $btnRead.Add_Click({
             $weeks = $out | ConvertFrom-Json
             Populate-Weeks $weeks
             Set-Status ("File loaded: " + $weeks.Count + " week(s) found") ([System.Drawing.Color]::LimeGreen)
+            $lblWeeksSummary.Text = "File loaded: " + $weeks.Count + " week(s) found"
             Append-Log ('[INFO] Loaded ' + $weeks.Count + ' week(s) from: ' + $txtFile.Text)
             foreach ($w in $weeks) {
                 Append-Log ('')

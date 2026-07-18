@@ -322,7 +322,7 @@ $form.Add_Resize({
 function Show-Settings {
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.Text = 'Settings'
-    $dlg.Size = New-Object System.Drawing.Size(620,540)
+    $dlg.ClientSize = New-Object System.Drawing.Size(612,518)
     $dlg.StartPosition = 'CenterParent'
     $dlg.FormBorderStyle = 'FixedDialog'
     $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
@@ -426,6 +426,17 @@ function Show-Settings {
     $colFreq.HeaderText = 'Frequency'; $colFreq.FillWeight = 90
     [void]$colFreq.Items.AddRange(@('weekly','sprint-end','placeholder'))
     [void]$gridStd.Columns.Add($colFreq)
+    $colDel = New-Object System.Windows.Forms.DataGridViewButtonColumn
+    $colDel.Name = 'Delete'; $colDel.HeaderText = ''
+    $colDel.Text = 'Delete'; $colDel.UseColumnTextForButtonValue = $true
+    $colDel.FillWeight = 55
+    [void]$gridStd.Columns.Add($colDel)
+    $gridStd.Add_CellContentClick({
+        param($eventSender, $e)
+        if ($e.RowIndex -ge 0 -and $gridStd.Columns[$e.ColumnIndex].Name -eq 'Delete') {
+            if (-not $gridStd.Rows[$e.RowIndex].IsNewRow) { $gridStd.Rows.RemoveAt($e.RowIndex) }
+        }
+    })
 
     $lblStdHint = New-Object System.Windows.Forms.Label
     $lblStdHint.Text = 'One hours value per task (same each day it occurs); blank = not that day. Placeholders: name only.'

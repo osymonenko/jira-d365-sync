@@ -306,12 +306,25 @@ $form.Add_Resize({
 function Show-Settings {
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.Text = 'Settings'
-    $dlg.Size = New-Object System.Drawing.Size(560,470)
+    $dlg.Size = New-Object System.Drawing.Size(620,540)
     $dlg.StartPosition = 'CenterParent'
     $dlg.FormBorderStyle = 'FixedDialog'
     $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
     $dlg.Font = New-Object System.Drawing.Font('Segoe UI',9)
     $dlg.BackColor = [System.Drawing.Color]::FromArgb(255,248,248,252)
+
+    $tabs = New-Object System.Windows.Forms.TabControl
+    $tabs.Location = New-Object System.Drawing.Point(8,8)
+    $tabs.Size = New-Object System.Drawing.Size(596,430)
+    [void]$dlg.Controls.Add($tabs)
+
+    $tabConn = New-Object System.Windows.Forms.TabPage; $tabConn.Text = 'Connection'
+    $tabStd  = New-Object System.Windows.Forms.TabPage; $tabStd.Text  = 'Standard tasks'
+    $tabJql  = New-Object System.Windows.Forms.TabPage; $tabJql.Text  = 'Jira queries'
+    $tabConn.BackColor = [System.Drawing.Color]::White
+    $tabStd.BackColor  = [System.Drawing.Color]::White
+    $tabJql.BackColor  = [System.Drawing.Color]::White
+    $tabs.TabPages.AddRange(@($tabConn, $tabStd, $tabJql))
 
     function Add-Row($parent, $label, $y, $pw = $false) {
         $lbl = New-Object System.Windows.Forms.Label
@@ -327,11 +340,11 @@ function Show-Settings {
     }
 
     $d = Read-EnvFile
-    $tUrl  = Add-Row $dlg 'Jira URL:'    20
-    $tMail = Add-Row $dlg 'Email:'       58
-    $tTok  = Add-Row $dlg 'API Token:'   96 $true
-    $tProj = Add-Row $dlg 'Project:'    134
-    $tAcct = Add-Row $dlg 'Account ID:' 172
+    $tUrl  = Add-Row $tabConn 'Jira URL:'    20
+    $tMail = Add-Row $tabConn 'Email:'       58
+    $tTok  = Add-Row $tabConn 'API Token:'   96 $true
+    $tProj = Add-Row $tabConn 'Project:'    134
+    $tAcct = Add-Row $tabConn 'Account ID:' 172
 
     $tUrl.Text  = if ($d['JIRA_URL'])        { $d['JIRA_URL'] }        else { 'https://amcbridge.atlassian.net' }
     $tMail.Text = if ($d['JIRA_EMAIL'])       { $d['JIRA_EMAIL'] }       else { '' }
@@ -346,9 +359,9 @@ function Show-Settings {
     $lblAcctHint.Size = New-Object System.Drawing.Size(390,16)
     $lblAcctHint.ForeColor = [System.Drawing.Color]::Gray
     $lblAcctHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
-    [void]$dlg.Controls.Add($lblAcctHint)
+    [void]$tabConn.Controls.Add($lblAcctHint)
 
-    $tAnchor = Add-Row $dlg 'Sprint end:' 219
+    $tAnchor = Add-Row $tabConn 'Sprint end:' 219
     $tAnchor.Text = if ($d['SPRINT_ANCHOR']) { $d['SPRINT_ANCHOR'] } else { '' }
     $lblAnchorHint = New-Object System.Windows.Forms.Label
     $lblAnchorHint.Text = 'Any sprint-end Friday (YYYY-MM-DD) - 2-week cycles counted from here'
@@ -356,18 +369,18 @@ function Show-Settings {
     $lblAnchorHint.Size = New-Object System.Drawing.Size(390,16)
     $lblAnchorHint.ForeColor = [System.Drawing.Color]::Gray
     $lblAnchorHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
-    [void]$dlg.Controls.Add($lblAnchorHint)
+    [void]$tabConn.Controls.Add($lblAnchorHint)
 
     # ---- Excel file row ----
     $lblEx = New-Object System.Windows.Forms.Label
     $lblEx.Text = 'Excel file:'; $lblEx.Location = New-Object System.Drawing.Point(16,269)
     $lblEx.Size = New-Object System.Drawing.Size(90,20); $lblEx.TextAlign = 'MiddleRight'
-    [void]$dlg.Controls.Add($lblEx)
+    [void]$tabConn.Controls.Add($lblEx)
     $tExcel = New-Object System.Windows.Forms.TextBox
     $tExcel.Location = New-Object System.Drawing.Point(114,266)
     $tExcel.Size = New-Object System.Drawing.Size(354,24)
     $tExcel.Text = $txtFile.Text
-    [void]$dlg.Controls.Add($tExcel)
+    [void]$tabConn.Controls.Add($tExcel)
     $btnExBrowse = New-Object System.Windows.Forms.Button
     $btnExBrowse.Text = '...'; $btnExBrowse.Location = New-Object System.Drawing.Point(474,266)
     $btnExBrowse.Size = New-Object System.Drawing.Size(30,24); $btnExBrowse.FlatStyle = 'Flat'
@@ -377,23 +390,23 @@ function Show-Settings {
         $fd.InitialDirectory = Split-Path $tExcel.Text -Parent
         if ($fd.ShowDialog() -eq 'OK') { $tExcel.Text = $fd.FileName }
     })
-    [void]$dlg.Controls.Add($btnExBrowse)
+    [void]$tabConn.Controls.Add($btnExBrowse)
 
     $chkSh = New-Object System.Windows.Forms.CheckBox
     $chkSh.Text = 'Show token'; $chkSh.Location = New-Object System.Drawing.Point(114,301)
     $chkSh.Size = New-Object System.Drawing.Size(100,22)
     $chkSh.Add_CheckedChanged({ $tTok.UseSystemPasswordChar = -not $chkSh.Checked })
-    [void]$dlg.Controls.Add($chkSh)
+    [void]$tabConn.Controls.Add($chkSh)
 
     $lblTest = New-Object System.Windows.Forms.Label
-    $lblTest.Location = New-Object System.Drawing.Point(16,304)
+    $lblTest.Location = New-Object System.Drawing.Point(16,446)
     $lblTest.Size = New-Object System.Drawing.Size(500,20)
     $lblTest.ForeColor = [System.Drawing.Color]::Gray
     [void]$dlg.Controls.Add($lblTest)
 
     $btnT = New-Object System.Windows.Forms.Button
     $btnT.Text = 'Test Connection'
-    $btnT.Location = New-Object System.Drawing.Point(16,363)
+    $btnT.Location = New-Object System.Drawing.Point(16,470)
     $btnT.Size = New-Object System.Drawing.Size(140,32)
     $btnT.Add_Click({
         $lblTest.Text = 'Testing...'; $lblTest.ForeColor = [System.Drawing.Color]::DodgerBlue
@@ -424,7 +437,7 @@ function Show-Settings {
 
     $btnSv = New-Object System.Windows.Forms.Button
     $btnSv.Text = 'Save & Close'; $btnSv.DialogResult = 'OK'
-    $btnSv.Location = New-Object System.Drawing.Point(410,363)
+    $btnSv.Location = New-Object System.Drawing.Point(470,470)
     $btnSv.Size = New-Object System.Drawing.Size(120,32)
     $btnSv.BackColor = [System.Drawing.Color]::FromArgb(255,0,122,200)
     $btnSv.ForeColor = [System.Drawing.Color]::White; $btnSv.FlatStyle = 'Flat'

@@ -406,6 +406,7 @@ def update_excel(file_path: str, insertions: dict) -> int:
         cell.font = link_font
 
     total = _apply_insertions(ws, payloads, write_row)
+    _reconcile_check_sums(ws)
     try:
         wb.save(file_path)
     except PermissionError:
@@ -420,15 +421,16 @@ _COL_LETTER = {4: "D", 5: "E", 6: "F", 7: "G", 8: "H"}
 # Pastel accents for the check-sum row.
 _PASTEL_BLUE = "BDD7EE"   # check-sum label fill
 _PASTEL_GREEN = "C6EFCE"  # a day that totals exactly 8h
-_BLACK = "000000"
-_WHITE = "FFFFFF"
+_PASTEL_RED = "FFC7CE"    # a day that totals under or over 8h
+_BLACK = "000000"         # standard font color, always — only the fill changes
 
 
 def _write_check_sum(ws, row: int, first_task_row: int, last_task_row: int) -> None:
     """Write a 'check sum' row: col C label (right-aligned, pastel blue) + per-day
     SUM formulas spanning the week's task rows, with live conditional formatting
-    on the totals (green at exactly 8h, black/white otherwise). This row is
-    ignored by the D365 importer (which skips any 'check sum' task name)."""
+    on the totals (pastel green at exactly 8h, pastel red otherwise; font color
+    always standard black). This row is ignored by the D365 importer (which
+    skips any 'check sum' task name)."""
     label = ws.cell(row=row, column=3)
     label.value = "check sum"
     label.alignment = Alignment(horizontal="right")
@@ -437,15 +439,48 @@ def _write_check_sum(ws, row: int, first_task_row: int, last_task_row: int) -> N
         letter = _COL_LETTER[col]
         ws.cell(row=row, column=col).value = f"=SUM({letter}{first_task_row}:{letter}{last_task_row})"
     # Live coloring of the day totals (recomputes as the user edits hours):
-    #   = 8  -> pastel green fill, default (dark) text
-    #   != 8 -> black fill, white text  (covers both < 8 and > 8)
+    #   = 8       -> pastel green fill
+    #   < 8 or > 8 -> pastel red fill  (covers both cases)
+    # Font stays standard black in both cases.
     day_range = f"{_COL_LETTER[4]}{row}:{_COL_LETTER[8]}{row}"
+    try:
+        del ws.conditional_formatting[day_range]  # avoid duplicate rules on re-run
+    except KeyError:
+        pass
     ws.conditional_formatting.add(day_range, CellIsRule(
         operator="equal", formula=["8"],
         fill=PatternFill("solid", fgColor=_PASTEL_GREEN), font=Font(color=_BLACK)))
     ws.conditional_formatting.add(day_range, CellIsRule(
         operator="notEqual", formula=["8"],
-        fill=PatternFill("solid", fgColor=_BLACK), font=Font(color=_WHITE)))
+        fill=PatternFill("solid", fgColor=_PASTEL_RED), font=Font(color=_BLACK)))
+
+
+def _reconcile_check_sums(ws) -> None:
+    """Rewrite every existing check-sum row's SUM formulas to match its block's
+    CURRENT physical task rows.
+
+    A check-sum formula's day-column references are baked in as plain text
+    (e.g. "=SUM(G24:G31)"). Inserting rows anywhere above a block — whether by
+    this same run's own overflow handling for an earlier week, or by a Jira
+    sync adding rows to a week above this one — shifts the block's cells
+    (including its check-sum row) down as a unit, but openpyxl's insert_rows
+    never rewrites formula text, so the old absolute row numbers stay literal
+    and silently start summing whatever now occupies those rows (usually the
+    week above). Re-deriving every check-sum row from a fresh find_weeks() scan
+    at the end of a run keeps them all honest regardless of what moved them."""
+    for week in find_weeks(ws):
+        check_row = week["check_sum_row"]
+        if check_row is None:
+            continue
+        occupied = [
+            r for r in range(week["start_row"], week["end_row"])
+            if r != check_row
+            and ws.cell(r, 3).value not in (None, "")
+            and str(ws.cell(r, 3).value).strip().lower() != "check sum"
+        ]
+        if not occupied:
+            continue
+        _write_check_sum(ws, check_row, min(occupied), max(occupied))
 
 
 def insert_standard_rows(file_path: str, insertions: dict) -> int:
@@ -510,6 +545,7 @@ def insert_standard_rows(file_path: str, insertions: dict) -> int:
         total += len(new_rows)
         print(f"[OK]   {key}: {len(new_rows)} rows written (check sum at row {check_row})", flush=True)
 
+    _reconcile_check_sums(ws)
     try:
         wb.save(file_path)
     except PermissionError:

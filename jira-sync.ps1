@@ -373,71 +373,27 @@ function Show-Settings {
     $panelJqlFlow.AutoScroll = $true
     [void]$tabJql.Controls.Add($panelJqlFlow)
 
-    $script:jqlBoxes = @{}
-
-    function New-JqlFixedRow($slot) {
-        $row = New-Object System.Windows.Forms.Panel
-        $row.Size = New-Object System.Drawing.Size(566,74)
-        $row.Margin = New-Object System.Windows.Forms.Padding(4,4,4,0)
-        $row.Tag = $slot.key
-
-        $lbl = New-Object System.Windows.Forms.Label
-        $lbl.Text = $slot.label; $lbl.Location = New-Object System.Drawing.Point(0,0)
-        $lbl.Size = New-Object System.Drawing.Size(400,16); $lbl.Font = New-Object System.Drawing.Font('Segoe UI',9,[System.Drawing.FontStyle]::Bold)
-        [void]$row.Controls.Add($lbl)
-
-        $box = New-Object System.Windows.Forms.TextBox
-        $box.Multiline = $true; $box.ScrollBars = 'Vertical'; $box.WordWrap = $true
-        $box.Location = New-Object System.Drawing.Point(0,18); $box.Size = New-Object System.Drawing.Size(490,46)
-        $box.Font = New-Object System.Drawing.Font('Consolas',8)
-        $box.Text = [string]$jqlValues[$slot.key]
-        [void]$row.Controls.Add($box)
-        $script:jqlBoxes[$slot.key] = $box
-
-        $btnCopy = New-Object System.Windows.Forms.Button
-        $btnCopy.Text = 'Copy'; $btnCopy.Location = New-Object System.Drawing.Point(494,18); $btnCopy.Size = New-Object System.Drawing.Size(64,46)
-        $btnCopy.FlatStyle = 'Flat'; $btnCopy.Tag = $slot.key
-        $btnCopy.Add_Click({
-            $key = $this.Tag
-            $tpl = [string]$script:jqlBoxes[$key].Text
-            $proj = if ($tProj.Text) { $tProj.Text } else { 'GT2' }
-            $acct = $tAcct.Text
-            $checked = @($script:weekCheckboxes | Where-Object { $_.Checked } | ForEach-Object { $_.Tag })
-            if ($checked.Count -gt 0) {
-                $ws = [string]$checked[0]
-                $we = ([datetime]::ParseExact($ws,'yyyy-MM-dd',$null).AddDays(6)).ToString('yyyy-MM-dd')
-            } else {
-                $today = Get-Date
-                $sunday = $today.AddDays(-[int]$today.DayOfWeek)
-                $ws = $sunday.ToString('yyyy-MM-dd'); $we = $sunday.AddDays(6).ToString('yyyy-MM-dd')
-            }
-            $resolved = $tpl.Replace('{project}',$proj).Replace('{account_id}',$acct).Replace('{ws}',$ws).Replace('{we}',$we)
-            [System.Windows.Forms.Clipboard]::SetText($resolved)
-        })
-        [void]$row.Controls.Add($btnCopy)
-
-        [void]$panelJqlFlow.Controls.Add($row)
-    }
-
-    foreach ($slot in $jqlSlots) { New-JqlFixedRow $slot }
-
-    function New-JqlCustomRow($key, $label, $jql) {
+    function New-JqlRow($key, $titleText, $jqlText, $titleEditable) {
         $row = New-Object System.Windows.Forms.Panel
         $row.Size = New-Object System.Drawing.Size(566,74)
         $row.Margin = New-Object System.Windows.Forms.Padding(4,4,4,0)
         $row.Tag = $key
 
-        $txtTitle = New-Object System.Windows.Forms.TextBox
-        $txtTitle.Text = $label; $txtTitle.Location = New-Object System.Drawing.Point(0,0)
-        $txtTitle.Size = New-Object System.Drawing.Size(420,18)
-        $txtTitle.Font = New-Object System.Drawing.Font('Segoe UI',9,[System.Drawing.FontStyle]::Bold)
-        [void]$row.Controls.Add($txtTitle)
+        if ($titleEditable) {
+            $titleCtl = New-Object System.Windows.Forms.TextBox
+        } else {
+            $titleCtl = New-Object System.Windows.Forms.Label
+        }
+        $titleCtl.Text = $titleText; $titleCtl.Location = New-Object System.Drawing.Point(0,0)
+        $titleCtl.Size = New-Object System.Drawing.Size(420,18)
+        $titleCtl.Font = New-Object System.Drawing.Font('Segoe UI',9,[System.Drawing.FontStyle]::Bold)
+        [void]$row.Controls.Add($titleCtl)
 
         $box = New-Object System.Windows.Forms.TextBox
         $box.Multiline = $true; $box.ScrollBars = 'Vertical'; $box.WordWrap = $true
         $box.Location = New-Object System.Drawing.Point(0,20); $box.Size = New-Object System.Drawing.Size(420,44)
         $box.Font = New-Object System.Drawing.Font('Consolas',8)
-        $box.Text = $jql
+        $box.Text = $jqlText
         [void]$row.Controls.Add($box)
 
         $btnCopy = New-Object System.Windows.Forms.Button
@@ -470,6 +426,17 @@ function Show-Settings {
         [void]$row.Controls.Add($btnDel)
 
         [void]$panelJqlFlow.Controls.Add($row)
+        return $row
+    }
+
+    $hiddenBuiltin = @{}
+    if ($jqlCfg -and $jqlCfg.PSObject.Properties.Match('hidden_builtin').Count -and $jqlCfg.hidden_builtin) {
+        foreach ($hk in $jqlCfg.hidden_builtin) { $hiddenBuiltin[$hk] = $true }
+    }
+
+    foreach ($slot in $jqlSlots) {
+        if ($hiddenBuiltin.ContainsKey($slot.key)) { continue }
+        New-JqlRow $slot.key $slot.label ([string]$jqlValues[$slot.key]) $false
     }
 
     if ($jqlCfg -and $jqlCfg.queries) {
@@ -477,19 +444,21 @@ function Show-Settings {
         foreach ($s in $jqlSlots) { $fixedKeySet[$s.key] = $true }
         foreach ($q in $jqlCfg.queries) {
             if (-not $fixedKeySet.ContainsKey($q.key)) {
-                New-JqlCustomRow $q.key $q.label $q.jql
+                New-JqlRow $q.key $q.label $q.jql $true
             }
         }
     }
 
     $panelJqlAddStrip = New-Object System.Windows.Forms.Panel
-    $panelJqlAddStrip.Dock = 'Top'; $panelJqlAddStrip.Height = 32
+    $panelJqlAddStrip.Dock = 'Bottom'; $panelJqlAddStrip.Height = 32
     $btnAddJql = New-Object System.Windows.Forms.Button
     $btnAddJql.Text = '+ Add query'; $btnAddJql.Location = New-Object System.Drawing.Point(0,2)
     $btnAddJql.Size = New-Object System.Drawing.Size(110,26); $btnAddJql.FlatStyle = 'Flat'
     $btnAddJql.Add_Click({
         $newKey = 'extra_' + ([guid]::NewGuid().ToString('N').Substring(0,8))
-        New-JqlCustomRow $newKey '' ''
+        $newRow = New-JqlRow $newKey '' '' $true
+        $panelJqlFlow.ScrollControlIntoView($newRow)
+        $newRow.Controls[0].Focus()
     })
     [void]$panelJqlAddStrip.Controls.Add($btnAddJql)
     [void]$tabJql.Controls.Add($panelJqlAddStrip)
@@ -615,18 +584,17 @@ function Show-Settings {
 
     $script:SaveJqlConfig = {
         $queries = @()
-        foreach ($slot in $jqlSlots) {
-            $queries += @{ key=$slot.key; label=$slot.label; jql=[string]$script:jqlBoxes[$slot.key].Text }
-        }
         $fixedKeys = @($jqlSlots | ForEach-Object { $_.key })
+        $presentFixed = @{}
         foreach ($row in $panelJqlFlow.Controls) {
-            if ($fixedKeys -contains $row.Tag) { continue }
             $title = [string]$row.Controls[0].Text
             $jql   = [string]$row.Controls[1].Text
+            if ($fixedKeys -contains $row.Tag) { $presentFixed[$row.Tag] = $true }
             if ([string]::IsNullOrWhiteSpace($title) -and [string]::IsNullOrWhiteSpace($jql)) { continue }
             $queries += @{ key=$row.Tag; label=$title; jql=$jql }
         }
-        Write-JsonConfig 'jql_queries.json' @{ queries=$queries }
+        $hidden = @($fixedKeys | Where-Object { -not $presentFixed.ContainsKey($_) })
+        Write-JsonConfig 'jql_queries.json' @{ queries=$queries; hidden_builtin=$hidden }
     }
 
     function Add-Row($parent, $label, $y, $pw = $false) {

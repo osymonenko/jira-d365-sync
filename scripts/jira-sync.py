@@ -20,6 +20,59 @@ from pathlib import Path
 from month_filter import clamp_week_to_month, month_bounds
 from standard_tasks import rows_for_week, DAY_COL, load_schedule
 
+import pathlib as _pathlib
+_CONFIG_DIR = _pathlib.Path(__file__).resolve().parent.parent / "config"
+
+DEFAULT_JQL = {
+    "investigation":
+        'project = {project} AND issuetype = Bug '
+        'AND created >= "{ws}" AND created <= "{we}" '
+        'AND (creator = {account_id} OR reporter = {account_id}) '
+        'ORDER BY priority DESC, issuetype ASC, key ASC',
+    "bug_verification":
+        'project = {project} AND issuetype = Bug '
+        'AND status CHANGED TO "Done" BY {account_id} DURING ("{ws}","{we}") '
+        'ORDER BY priority DESC, issuetype ASC, key ASC',
+    "story_creation":
+        'project = {project} AND issuetype = Story '
+        'AND created >= "{ws}" AND created <= "{we}" '
+        'AND creator = {account_id} AND parent = {project}-80 '
+        'ORDER BY status DESC, issuetype ASC, key ASC',
+    "functional_testing":
+        'project = {project} AND issuetype = Story AND ('
+        'status CHANGED FROM "Ready for QA" BY {account_id} DURING ("{ws}", "{we}") OR '
+        'status CHANGED FROM "IN QA" BY {account_id} DURING ("{ws}", "{we}")) '
+        'ORDER BY key ASC',
+    "regression_testing":
+        'project = {project} AND status CHANGED TO Done BY {account_id} DURING ("{ws}", "{we}") '
+        'AND parent = {project}-73 AND summary ~ "Regression" '
+        'ORDER BY status DESC, issuetype ASC, key ASC',
+    "other_qa":
+        'project = {project} AND status CHANGED TO Done BY {account_id} DURING ("{ws}", "{we}") '
+        'AND parent = {project}-73 '
+        'AND summary !~ "Smoke" AND summary !~ "Regression" AND summary !~ "Functional." '
+        'ORDER BY status DESC, issuetype ASC, key ASC',
+}
+
+
+def load_jql() -> dict:
+    """Return {key: jql_template}, overlaying config/jql_queries.json onto the
+    built-in DEFAULT_JQL per key. Missing/invalid config -> all defaults."""
+    templates = dict(DEFAULT_JQL)
+    path = _CONFIG_DIR / "jql_queries.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for entry in data["queries"]:
+            key, jql = entry["key"], entry["jql"]
+            if key in templates and isinstance(jql, str) and jql.strip():
+                templates[key] = jql
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"[WARN] Invalid config/jql_queries.json ({e}); using defaults", flush=True)
+    return templates
+
+
 # Reverse of DAY_COL (column index -> day name) for human-readable logging.
 _COL_DAY = {col: day for day, col in DAY_COL.items()}
 
@@ -170,6 +223,11 @@ def generate_week_rows(
     ws, we = fmt(week_start), fmt(week_end)
     rows: list[tuple[str, str]] = []
 
+    templates = load_jql()
+
+    def build(key):
+        return templates[key].format(project=project, account_id=account_id, ws=ws, we=we)
+
     def search_url(jql: str) -> str:
         return f"{base_url}/issues/?jql={urllib.parse.quote(jql)}"
 
@@ -179,10 +237,7 @@ def generate_week_rows(
     # 1. Investigation issue — bugs created this week that the user filed
     #    (creator) or is the reporter of. In Jira creator (who clicked "Create")
     #    and reporter (who the bug is attributed to) can differ, so match either.
-    jql = (f'project = {project} AND issuetype = Bug '
-           f'AND created >= "{ws}" AND created <= "{we}" '
-           f'AND (creator = {account_id} OR reporter = {account_id}) '
-           f'ORDER BY priority DESC, issuetype ASC, key ASC')
+    jql = build("investigation")
     issues = search_jira(base_url, email, token, jql)
     if issues:
         name = f"Investigation issue {len(issues)}"
@@ -192,9 +247,7 @@ def generate_week_rows(
         print(f"  [1/6] Investigation issues (bugs you created/reported this week): 0 found", flush=True)
 
     # 2. Bug verification — count by priority bucket
-    jql = (f'project = {project} AND issuetype = Bug '
-           f'AND status CHANGED TO "Done" BY {account_id} DURING ("{ws}","{we}") '
-           f'ORDER BY priority DESC, issuetype ASC, key ASC')
+    jql = build("bug_verification")
     issues = search_jira(base_url, email, token, jql)
     if issues:
         buckets: dict[str, int] = {"P1": 0, "P2": 0, "P3": 0}
@@ -209,10 +262,7 @@ def generate_week_rows(
         print(f"  [2/6] Bug verification (closed by you): 0 found", flush=True)
 
     # 3. User story creation — count of stories created under GT2-80
-    jql = (f'project = {project} AND issuetype = Story '
-           f'AND created >= "{ws}" AND created <= "{we}" '
-           f'AND creator = {account_id} AND parent = {project}-80 '
-           f'ORDER BY status DESC, issuetype ASC, key ASC')
+    jql = build("story_creation")
     issues = search_jira(base_url, email, token, jql)
     if issues:
         name = f"User story creation {len(issues)}"
@@ -222,10 +272,7 @@ def generate_week_rows(
         print(f"  [3/6] User story creation: 0 found", flush=True)
 
     # 4. Functional testing — one row per story key, direct issue link
-    jql = (f'project = {project} AND issuetype = Story AND ('
-           f'status CHANGED FROM "Ready for QA" BY {account_id} DURING ("{ws}", "{we}") OR '
-           f'status CHANGED FROM "IN QA" BY {account_id} DURING ("{ws}", "{we}")) '
-           f'ORDER BY key ASC')
+    jql = build("functional_testing")
     issues = search_jira(base_url, email, token, jql)
     print(f"  [4/6] Functional testing stories: {len(issues)} found", flush=True)
     for iss in issues:
@@ -234,9 +281,7 @@ def generate_week_rows(
         rows.append((name, issue_url(iss['key'])))
 
     # 5. Regression testing — last number from summary, direct issue link
-    jql = (f'project = {project} AND status CHANGED TO Done BY {account_id} DURING ("{ws}", "{we}") '
-           f'AND parent = {project}-73 AND summary ~ "Regression" '
-           f'ORDER BY status DESC, issuetype ASC, key ASC')
+    jql = build("regression_testing")
     issues = search_jira(base_url, email, token, jql)
     if len(issues) > 1:
         print(f"  [WARN] Regression: {len(issues)} items found (expected 1)", flush=True)
@@ -248,10 +293,7 @@ def generate_week_rows(
         rows.append((name, issue_url(iss['key'])))
 
     # 6. Other QA activities (GT2-73, non-smoke/regression/functional) — direct issue link
-    jql = (f'project = {project} AND status CHANGED TO Done BY {account_id} DURING ("{ws}", "{we}") '
-           f'AND parent = {project}-73 '
-           f'AND summary !~ "Smoke" AND summary !~ "Regression" AND summary !~ "Functional." '
-           f'ORDER BY status DESC, issuetype ASC, key ASC')
+    jql = build("other_qa")
     issues = search_jira(base_url, email, token, jql)
     print(f"  [6/6] Other QA activities ({project}-73 subtasks): {len(issues)} found", flush=True)
     for iss in issues:

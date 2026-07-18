@@ -16,9 +16,9 @@ function Read-EnvFile {
     return $h
 }
 
-function Save-JiraEnv($url, $email, $token, $project, $accountId, $excelFile, $sprintAnchor) {
-    $keys = @('JIRA_URL','JIRA_EMAIL','JIRA_API_TOKEN','JIRA_PROJECT','JIRA_ACCOUNT_ID','EXCEL_FILE','SPRINT_ANCHOR')
-    $vals = @{ JIRA_URL=$url; JIRA_EMAIL=$email; JIRA_API_TOKEN=$token; JIRA_PROJECT=$project; JIRA_ACCOUNT_ID=$accountId; EXCEL_FILE=$excelFile; SPRINT_ANCHOR=$sprintAnchor }
+function Save-JiraEnv($url, $email, $token, $project, $accountId, $excelFile, $sprintAnchor, $sprintLengthWeeks) {
+    $keys = @('JIRA_URL','JIRA_EMAIL','JIRA_API_TOKEN','JIRA_PROJECT','JIRA_ACCOUNT_ID','EXCEL_FILE','SPRINT_ANCHOR','SPRINT_LENGTH_WEEKS')
+    $vals = @{ JIRA_URL=$url; JIRA_EMAIL=$email; JIRA_API_TOKEN=$token; JIRA_PROJECT=$project; JIRA_ACCOUNT_ID=$accountId; EXCEL_FILE=$excelFile; SPRINT_ANCHOR=$sprintAnchor; SPRINT_LENGTH_WEEKS=$sprintLengthWeeks }
     $lines = @(); $written = @{}
     if (Test-Path $envFile) {
         Get-Content $envFile | ForEach-Object {
@@ -494,9 +494,49 @@ function Show-Settings {
     [void]$panelJqlAddStrip.Controls.Add($btnAddJql)
     [void]$tabJql.Controls.Add($panelJqlAddStrip)
 
+    $d = Read-EnvFile
+    $lblSprintLen = New-Object System.Windows.Forms.Label
+    $lblSprintLen.Text = 'Sprint length (weeks):'
+    $lblSprintLen.Location = New-Object System.Drawing.Point(8,10)
+    $lblSprintLen.Size = New-Object System.Drawing.Size(140,20)
+    [void]$tabStd.Controls.Add($lblSprintLen)
+    $tSprintLen = New-Object System.Windows.Forms.TextBox
+    $tSprintLen.Location = New-Object System.Drawing.Point(152,8)
+    $tSprintLen.Size = New-Object System.Drawing.Size(40,24)
+    [void]$tabStd.Controls.Add($tSprintLen)
+
+    $lblAnchorRow = New-Object System.Windows.Forms.Label
+    $lblAnchorRow.Text = 'Sprint end:'
+    $lblAnchorRow.Location = New-Object System.Drawing.Point(210,10)
+    $lblAnchorRow.Size = New-Object System.Drawing.Size(70,20)
+    [void]$tabStd.Controls.Add($lblAnchorRow)
+    $tAnchor = New-Object System.Windows.Forms.TextBox
+    $tAnchor.Location = New-Object System.Drawing.Point(284,8)
+    $tAnchor.Size = New-Object System.Drawing.Size(110,24)
+    [void]$tabStd.Controls.Add($tAnchor)
+
+    $lblAnchorHint = New-Object System.Windows.Forms.Label
+    $lblAnchorHint.Location = New-Object System.Drawing.Point(8,36)
+    $lblAnchorHint.Size = New-Object System.Drawing.Size(572,16)
+    $lblAnchorHint.ForeColor = [System.Drawing.Color]::Gray
+    $lblAnchorHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
+    [void]$tabStd.Controls.Add($lblAnchorHint)
+
+    function Update-AnchorHint {
+        $weeks = 2
+        $parsed = 0
+        if ([int]::TryParse($tSprintLen.Text, [ref]$parsed) -and $parsed -gt 0) { $weeks = $parsed }
+        $lblAnchorHint.Text = "Any sprint-end Friday (YYYY-MM-DD) - $weeks-week cycles counted from here"
+    }
+    $tSprintLen.Add_TextChanged({ Update-AnchorHint })
+
+    $tAnchor.Text = if ($d['SPRINT_ANCHOR']) { $d['SPRINT_ANCHOR'] } else { '' }
+    $tSprintLen.Text = if ($d['SPRINT_LENGTH_WEEKS']) { $d['SPRINT_LENGTH_WEEKS'] } else { '2' }
+    Update-AnchorHint
+
     $gridStd = New-Object System.Windows.Forms.DataGridView
-    $gridStd.Location = New-Object System.Drawing.Point(8,8)
-    $gridStd.Size = New-Object System.Drawing.Size(572,350)
+    $gridStd.Location = New-Object System.Drawing.Point(8,60)
+    $gridStd.Size = New-Object System.Drawing.Size(572,304)
     $gridStd.AllowUserToAddRows = $true
     $gridStd.AllowUserToDeleteRows = $true
     $gridStd.AutoSizeColumnsMode = 'Fill'
@@ -525,7 +565,7 @@ function Show-Settings {
 
     $lblStdHint = New-Object System.Windows.Forms.Label
     $lblStdHint.Text = 'One hours value per task (same each day it occurs); blank = not that day. Placeholders: name only.'
-    $lblStdHint.Location = New-Object System.Drawing.Point(8,362); $lblStdHint.Size = New-Object System.Drawing.Size(572,18)
+    $lblStdHint.Location = New-Object System.Drawing.Point(8,368); $lblStdHint.Size = New-Object System.Drawing.Size(572,18)
     $lblStdHint.ForeColor = [System.Drawing.Color]::Gray; $lblStdHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
     [void]$tabStd.Controls.Add($lblStdHint)
 
@@ -603,49 +643,46 @@ function Show-Settings {
     }
 
     $d = Read-EnvFile
-    $tUrl  = Add-Row $tabConn 'Jira URL:'    20
-    $tMail = Add-Row $tabConn 'Email:'       58
-    $tTok  = Add-Row $tabConn 'API Token:'   96 $true
-    $tProj = Add-Row $tabConn 'Project:'    134
-    $tAcct = Add-Row $tabConn 'Account ID:' 172
+    $tUrl  = Add-Row $tabConn 'Jira URL:'    16
+    $tTok  = Add-Row $tabConn 'API Token:'   54 $true
+
+    $chkSh = New-Object System.Windows.Forms.CheckBox
+    $chkSh.Text = 'Show token'; $chkSh.Location = New-Object System.Drawing.Point(114,80)
+    $chkSh.Size = New-Object System.Drawing.Size(100,22)
+    $chkSh.Add_CheckedChanged({ $tTok.UseSystemPasswordChar = -not $chkSh.Checked })
+    [void]$tabConn.Controls.Add($chkSh)
+
+    $tProj = Add-Row $tabConn 'Project key:' 110
+    $tMail = Add-Row $tabConn 'Email:'       148
+    $tAcct = Add-Row $tabConn 'Account ID:'  186
 
     $tUrl.Text  = if ($d['JIRA_URL'])        { $d['JIRA_URL'] }        else { 'https://amcbridge.atlassian.net' }
-    $tMail.Text = if ($d['JIRA_EMAIL'])       { $d['JIRA_EMAIL'] }       else { '' }
     $tTok.Text  = if ($d['JIRA_API_TOKEN'])   { $d['JIRA_API_TOKEN'] }   else { '' }
     $tProj.Text = if ($d['JIRA_PROJECT'])     { $d['JIRA_PROJECT'] }     else { 'GT2' }
+    $tMail.Text = if ($d['JIRA_EMAIL'])       { $d['JIRA_EMAIL'] }       else { '' }
     $tAcct.Text = if ($d['JIRA_ACCOUNT_ID'])  { $d['JIRA_ACCOUNT_ID'] }  else { '' }
 
     # Hint: which Jira user the activity queries (2,3,4,5,6) filter on. Empty = token owner.
     $lblAcctHint = New-Object System.Windows.Forms.Label
     $lblAcctHint.Text = 'Leave empty to use the API-token owner (/myself)'
-    $lblAcctHint.Location = New-Object System.Drawing.Point(114,197)
+    $lblAcctHint.Location = New-Object System.Drawing.Point(114,211)
     $lblAcctHint.Size = New-Object System.Drawing.Size(390,16)
     $lblAcctHint.ForeColor = [System.Drawing.Color]::Gray
     $lblAcctHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
     [void]$tabConn.Controls.Add($lblAcctHint)
 
-    $tAnchor = Add-Row $tabConn 'Sprint end:' 219
-    $tAnchor.Text = if ($d['SPRINT_ANCHOR']) { $d['SPRINT_ANCHOR'] } else { '' }
-    $lblAnchorHint = New-Object System.Windows.Forms.Label
-    $lblAnchorHint.Text = 'Any sprint-end Friday (YYYY-MM-DD) - 2-week cycles counted from here'
-    $lblAnchorHint.Location = New-Object System.Drawing.Point(114,244)
-    $lblAnchorHint.Size = New-Object System.Drawing.Size(390,16)
-    $lblAnchorHint.ForeColor = [System.Drawing.Color]::Gray
-    $lblAnchorHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
-    [void]$tabConn.Controls.Add($lblAnchorHint)
-
     # ---- Excel file row ----
     $lblEx = New-Object System.Windows.Forms.Label
-    $lblEx.Text = 'Excel file:'; $lblEx.Location = New-Object System.Drawing.Point(16,269)
+    $lblEx.Text = 'Excel file:'; $lblEx.Location = New-Object System.Drawing.Point(16,237)
     $lblEx.Size = New-Object System.Drawing.Size(90,20); $lblEx.TextAlign = 'MiddleRight'
     [void]$tabConn.Controls.Add($lblEx)
     $tExcel = New-Object System.Windows.Forms.TextBox
-    $tExcel.Location = New-Object System.Drawing.Point(114,266)
+    $tExcel.Location = New-Object System.Drawing.Point(114,234)
     $tExcel.Size = New-Object System.Drawing.Size(354,24)
     $tExcel.Text = $txtFile.Text
     [void]$tabConn.Controls.Add($tExcel)
     $btnExBrowse = New-Object System.Windows.Forms.Button
-    $btnExBrowse.Text = '...'; $btnExBrowse.Location = New-Object System.Drawing.Point(474,266)
+    $btnExBrowse.Text = '...'; $btnExBrowse.Location = New-Object System.Drawing.Point(474,234)
     $btnExBrowse.Size = New-Object System.Drawing.Size(30,24); $btnExBrowse.FlatStyle = 'Flat'
     $btnExBrowse.Add_Click({
         $fd = New-Object System.Windows.Forms.OpenFileDialog
@@ -655,26 +692,20 @@ function Show-Settings {
     })
     [void]$tabConn.Controls.Add($btnExBrowse)
 
-    $chkSh = New-Object System.Windows.Forms.CheckBox
-    $chkSh.Text = 'Show token'; $chkSh.Location = New-Object System.Drawing.Point(114,301)
-    $chkSh.Size = New-Object System.Drawing.Size(100,22)
-    $chkSh.Add_CheckedChanged({ $tTok.UseSystemPasswordChar = -not $chkSh.Checked })
-    [void]$tabConn.Controls.Add($chkSh)
-
     $lblTest = New-Object System.Windows.Forms.Label
-    $lblTest.Location = New-Object System.Drawing.Point(16,446)
-    $lblTest.Size = New-Object System.Drawing.Size(500,20)
+    $lblTest.Location = New-Object System.Drawing.Point(16,272)
+    $lblTest.Size = New-Object System.Drawing.Size(460,20)
     $lblTest.ForeColor = [System.Drawing.Color]::Gray
-    [void]$dlg.Controls.Add($lblTest)
+    [void]$tabConn.Controls.Add($lblTest)
 
     $btnT = New-Object System.Windows.Forms.Button
     $btnT.Text = 'Test Connection'
-    $btnT.Location = New-Object System.Drawing.Point(16,470)
+    $btnT.Location = New-Object System.Drawing.Point(16,296)
     $btnT.Size = New-Object System.Drawing.Size(140,32)
     $btnT.Add_Click({
         $lblTest.Text = 'Testing...'; $lblTest.ForeColor = [System.Drawing.Color]::DodgerBlue
         $dlg.Refresh()
-        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text
+        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text $tSprintLen.Text
         $psi2 = New-Object System.Diagnostics.ProcessStartInfo
         $psi2.FileName = 'python'; $psi2.Arguments = "scripts\jira-sync.py --command test --file `"$($tExcel.Text)`""
         $psi2.WorkingDirectory = $scriptDir; $psi2.UseShellExecute = $false
@@ -696,7 +727,7 @@ function Show-Settings {
             $lblConnStatus.ForeColor = [System.Drawing.Color]::OrangeRed
         }
     })
-    [void]$dlg.Controls.Add($btnT)
+    [void]$tabConn.Controls.Add($btnT)
 
     $btnSv = New-Object System.Windows.Forms.Button
     $btnSv.Text = 'Save & Close'; $btnSv.DialogResult = 'OK'
@@ -705,7 +736,7 @@ function Show-Settings {
     $btnSv.BackColor = [System.Drawing.Color]::FromArgb(255,0,122,200)
     $btnSv.ForeColor = [System.Drawing.Color]::White; $btnSv.FlatStyle = 'Flat'
     $btnSv.Add_Click({
-        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text
+        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text $tSprintLen.Text
         & $script:SaveStandardFromGrid
         & $script:SaveJqlConfig
         $txtFile.Text = $tExcel.Text

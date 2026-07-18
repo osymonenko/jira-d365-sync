@@ -33,6 +33,21 @@ function Save-JiraEnv($url, $email, $token, $project, $accountId, $excelFile, $s
     $lines | Set-Content $envFile -Encoding utf8
 }
 
+$configDir = Join-Path $scriptDir 'config'
+
+function Read-JsonConfig($name) {
+    $p = Join-Path $configDir $name
+    if (Test-Path $p) {
+        try { return (Get-Content $p -Raw -Encoding utf8 | ConvertFrom-Json) } catch { return $null }
+    }
+    return $null
+}
+
+function Write-JsonConfig($name, $obj) {
+    if (-not (Test-Path $configDir)) { New-Item -ItemType Directory -Path $configDir | Out-Null }
+    $obj | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $configDir $name) -Encoding utf8
+}
+
 $envData = Read-EnvFile
 
 # ============================================================
@@ -326,6 +341,74 @@ function Show-Settings {
     $tabJql.BackColor  = [System.Drawing.Color]::White
     $tabs.TabPages.AddRange(@($tabConn, $tabStd, $tabJql))
 
+    $gridStd = New-Object System.Windows.Forms.DataGridView
+    $gridStd.Location = New-Object System.Drawing.Point(8,8)
+    $gridStd.Size = New-Object System.Drawing.Size(572,350)
+    $gridStd.AllowUserToAddRows = $true
+    $gridStd.AllowUserToDeleteRows = $true
+    $gridStd.AutoSizeColumnsMode = 'Fill'
+    [void]$tabStd.Controls.Add($gridStd)
+    $colName = New-Object System.Windows.Forms.DataGridViewTextBoxColumn; $colName.HeaderText = 'Task'; $colName.FillWeight = 200
+    [void]$gridStd.Columns.Add($colName)
+    foreach ($dh in 'Mon','Tue','Wed','Thu','Fri') {
+        $col = New-Object System.Windows.Forms.DataGridViewTextBoxColumn; $col.HeaderText = $dh; $col.FillWeight = 45
+        [void]$gridStd.Columns.Add($col)
+    }
+    $colFreq = New-Object System.Windows.Forms.DataGridViewComboBoxColumn
+    $colFreq.HeaderText = 'Frequency'; $colFreq.FillWeight = 90
+    [void]$colFreq.Items.AddRange(@('weekly','sprint-end','placeholder'))
+    [void]$gridStd.Columns.Add($colFreq)
+
+    $lblStdHint = New-Object System.Windows.Forms.Label
+    $lblStdHint.Text = 'Hours per day in Mon-Fri; blank = not that day. placeholder rows carry a name only.'
+    $lblStdHint.Location = New-Object System.Drawing.Point(8,362); $lblStdHint.Size = New-Object System.Drawing.Size(572,18)
+    $lblStdHint.ForeColor = [System.Drawing.Color]::Gray; $lblStdHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
+    [void]$tabStd.Controls.Add($lblStdHint)
+
+    $stdCfg = Read-JsonConfig 'standard_tasks.json'
+    $defaultSchedule = @(
+        @{name='Internal Daily meeting'; hours=0.5; days=@('Mon','Tue','Wed','Thu','Fri'); freq='weekly'},
+        @{name='Internal bug triage'; hours=0.5; days=@('Tue'); freq='weekly'},
+        @{name='External customer meeting'; hours=1.0; days=@('Tue','Wed'); freq='weekly'},
+        @{name='Weekly project report'; hours=1.0; days=@('Fri'); freq='weekly'},
+        @{name='Internal sprint review'; hours=0.5; days=@('Fri'); freq='sprint-end'},
+        @{name='External sprint review'; hours=1.0; days=@('Fri'); freq='sprint-end'},
+        @{name='Summary report creation'; hours=2.0; days=@('Fri'); freq='sprint-end'}
+    )
+    $defaultPlaceholders = @('Bug verification','Functional testing','Automation test maintenance','Investigation issue')
+
+    $schedule = if ($stdCfg -and $stdCfg.schedule) { $stdCfg.schedule } else { $defaultSchedule }
+    $placeholders = if ($stdCfg -and $stdCfg.placeholders) { $stdCfg.placeholders } else { $defaultPlaceholders }
+
+    $dayIndex = @{ Mon=1; Tue=2; Wed=3; Thu=4; Fri=5 }
+    foreach ($t in $schedule) {
+        $cells = @($t.name, '', '', '', '', '', $t.freq)
+        foreach ($dn in $t.days) { $cells[$dayIndex[$dn]] = [string]$t.hours }
+        [void]$gridStd.Rows.Add($cells)
+    }
+    foreach ($ph in $placeholders) {
+        [void]$gridStd.Rows.Add(@($ph, '', '', '', '', '', 'placeholder'))
+    }
+
+    $script:SaveStandardFromGrid = {
+        $sched = @(); $ph = @()
+        foreach ($row in $gridStd.Rows) {
+            if ($row.IsNewRow) { continue }
+            $name = [string]$row.Cells[0].Value
+            if ([string]::IsNullOrWhiteSpace($name)) { continue }
+            $freq = [string]$row.Cells[6].Value
+            if ($freq -eq 'placeholder') { $ph += $name.Trim(); continue }
+            $days = @(); $hours = $null
+            foreach ($dn in 'Mon','Tue','Wed','Thu','Fri') {
+                $v = [string]$row.Cells[$dayIndex[$dn]].Value
+                if (-not [string]::IsNullOrWhiteSpace($v)) { $days += $dn; $hours = [double]$v }
+            }
+            if ($days.Count -eq 0) { continue }
+            $sched += @{ name=$name.Trim(); hours=$hours; days=$days; freq=$(if ($freq) { $freq } else { 'weekly' }) }
+        }
+        Write-JsonConfig 'standard_tasks.json' @{ schedule=$sched; placeholders=$ph }
+    }
+
     function Add-Row($parent, $label, $y, $pw = $false) {
         $lbl = New-Object System.Windows.Forms.Label
         $lbl.Text = $label; $lbl.Location = New-Object System.Drawing.Point(16,$($y+3))
@@ -443,6 +526,7 @@ function Show-Settings {
     $btnSv.ForeColor = [System.Drawing.Color]::White; $btnSv.FlatStyle = 'Flat'
     $btnSv.Add_Click({
         Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text
+        & $script:SaveStandardFromGrid
         $txtFile.Text = $tExcel.Text
     })
     [void]$dlg.Controls.Add($btnSv)

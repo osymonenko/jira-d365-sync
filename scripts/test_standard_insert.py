@@ -70,6 +70,19 @@ def main():
     assert c(5, 8) == "=SUM(H2:H4)", c(5, 8)
     print("  OK block A: check sum row with =SUM(D2:D4)..=SUM(H2:H4)")
 
+    # check sum LABEL styling: right-aligned + pastel-blue fill
+    label = ws.cell(5, 3)
+    assert label.alignment.horizontal == "right", label.alignment.horizontal
+    assert str(label.fill.fgColor.rgb).endswith("BDD7EE"), label.fill.fgColor.rgb
+    print("  OK block A: check-sum label right-aligned + pastel-blue fill")
+
+    # conditional formatting on the day totals D5:H5 (green=8 / black-white otherwise)
+    ranges = {str(cf.sqref) for cf in ws.conditional_formatting}
+    assert "D5:H5" in ranges, ranges
+    n_rules = sum(len(cf.rules) for cf in ws.conditional_formatting if str(cf.sqref) == "D5:H5")
+    assert n_rules == 2, f"expected 2 CF rules on D5:H5, got {n_rules}"
+    print("  OK block A: 2 conditional-format rules on the day totals (D5:H5)")
+
     # --- Block B: dup skipped, new task appended after the existing one ---
     assert c(14, 3) == "External customer meeting", c(14, 3)   # pre-existing untouched
     assert c(15, 3) == "Internal bug triage" and c(15, 5) == 0.5, (c(15, 3), c(15, 5))

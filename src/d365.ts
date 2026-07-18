@@ -78,6 +78,16 @@ const SELECTORS = {
     '[role="dialog"][aria-label="Calendar"], ' +
     '[role="dialog"][aria-label*="Date Picker" i], ' +
     '.fui-DatePicker__popupSurface',
+  // D365's native navigation-away guard ("Unsaved changes — Do you want to save
+  // your changes before leaving this page?"). Confirmed via error screenshots
+  // 2026-07-18: pressing Escape on the "Imported Project Task" sub-panel (when it
+  // hasn't visibly closed within 20s) does NOT dismiss the panel — it instead
+  // triggers this confirmation dialog, which is a genuine second modal
+  // (`div[id^="modalDialogRoot_"]`) that intercepts pointer events on the entire
+  // page indefinitely until explicitly answered.
+  unsavedChangesDialog: '[role="dialog"]:has-text("Unsaved changes"), div[id^="modalDialogRoot_"]:has-text("Unsaved changes")',
+  unsavedChangesSaveBtn: 'button:has-text("Save and continue")',
+  unsavedChangesDiscardBtn: 'button:has-text("Discard changes")',
 };
 
 // Map decimal hours to the exact label used in the Payable Duration dropdown.
@@ -490,6 +500,22 @@ export class D365Client {
     if (!subPanelClosed) {
       this.log(`    ⚠ Sub-panel did not close after 20s — pressing Escape to dismiss overlay`);
       await page.keyboard.press('Escape');
+      // Escape on the still-open sub-panel does not necessarily close it — it can
+      // instead trigger D365's native "Unsaved changes" navigation-away confirmation
+      // dialog (confirmed via error screenshots 2026-07-18). That dialog is a real
+      // second modal that blocks every subsequent click page-wide until answered, so
+      // we must explicitly detect and answer it rather than assume Escape worked.
+      const unsavedDialog = page.locator(SELECTORS.unsavedChangesDialog).first();
+      const unsavedDialogShown = await unsavedDialog
+        .waitFor({ state: 'visible', timeout: 3000 })
+        .then(() => true)
+        .catch(() => false);
+      if (unsavedDialogShown) {
+        this.log(`    ⚠ "Unsaved changes" dialog appeared — clicking "Save and continue" to clear it`);
+        const saveContinueBtn = unsavedDialog.locator(SELECTORS.unsavedChangesSaveBtn).first();
+        await saveContinueBtn.click({ timeout: 5000 }).catch(() => {});
+        await unsavedDialog.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
+      }
       await importedPanel.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
     }
     // Extra wait for D365's DialogContainer overlay to fully detach from the DOM.

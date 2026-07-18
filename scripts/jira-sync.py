@@ -431,17 +431,22 @@ _BLACK = "FF000000"         # standard font color, always — only the fill chan
 
 def _write_check_sum(ws, row: int, first_task_row: int, last_task_row: int) -> None:
     """Write a 'check sum' row: col C label (right-aligned, pastel blue) + per-day
-    SUM formulas spanning the week's task rows, with live conditional formatting
-    on the totals (pastel green at exactly 8h, pastel red otherwise; font color
-    always standard black). This row is ignored by the D365 importer (which
-    skips any 'check sum' task name)."""
+    SUM formulas spanning the week's task rows. The day cells get the same
+    pastel-blue fill as the label directly on the cell (guaranteed to render
+    in any viewer, matching how the label itself already renders), plus
+    conditional formatting on top for spreadsheet apps that support it (pastel
+    green exactly at 8h, pastel red otherwise — overrides the blue when a
+    viewer honors it). Font color always standard black. This row is ignored
+    by the D365 importer (which skips any 'check sum' task name)."""
     label = ws.cell(row=row, column=3)
     label.value = "check sum"
     label.alignment = Alignment(horizontal="right")
     label.fill = PatternFill("solid", fgColor=_PASTEL_BLUE)
     for col in _DAY_COLS:
         letter = _COL_LETTER[col]
-        ws.cell(row=row, column=col).value = f"=SUM({letter}{first_task_row}:{letter}{last_task_row})"
+        cell = ws.cell(row=row, column=col)
+        cell.value = f"=SUM({letter}{first_task_row}:{letter}{last_task_row})"
+        cell.fill = PatternFill("solid", fgColor=_PASTEL_BLUE)
     # Live coloring of the day totals (recomputes as the user edits hours):
     #   = 8       -> pastel green fill
     #   < 8 or > 8 -> pastel red fill  (covers both cases)

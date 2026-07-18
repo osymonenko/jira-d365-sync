@@ -45,7 +45,8 @@ function Read-JsonConfig($name) {
 
 function Write-JsonConfig($name, $obj) {
     if (-not (Test-Path $configDir)) { New-Item -ItemType Directory -Path $configDir | Out-Null }
-    $obj | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $configDir $name) -Encoding utf8
+    $json = $obj | ConvertTo-Json -Depth 6
+    [System.IO.File]::WriteAllText((Join-Path $configDir $name), $json, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 $envData = Read-EnvFile
@@ -360,7 +361,7 @@ function Show-Settings {
     [void]$gridStd.Columns.Add($colFreq)
 
     $lblStdHint = New-Object System.Windows.Forms.Label
-    $lblStdHint.Text = 'Hours per day in Mon-Fri; blank = not that day. placeholder rows carry a name only.'
+    $lblStdHint.Text = 'One hours value per task (same each day it occurs); blank = not that day. Placeholders: name only.'
     $lblStdHint.Location = New-Object System.Drawing.Point(8,362); $lblStdHint.Size = New-Object System.Drawing.Size(572,18)
     $lblStdHint.ForeColor = [System.Drawing.Color]::Gray; $lblStdHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
     [void]$tabStd.Controls.Add($lblStdHint)
@@ -377,8 +378,8 @@ function Show-Settings {
     )
     $defaultPlaceholders = @('Bug verification','Functional testing','Automation test maintenance','Investigation issue')
 
-    $schedule = if ($stdCfg -and $stdCfg.schedule) { $stdCfg.schedule } else { $defaultSchedule }
-    $placeholders = if ($stdCfg -and $stdCfg.placeholders) { $stdCfg.placeholders } else { $defaultPlaceholders }
+    $schedule = if ($stdCfg -and $stdCfg.PSObject.Properties.Match('schedule').Count) { $stdCfg.schedule } else { $defaultSchedule }
+    $placeholders = if ($stdCfg -and $stdCfg.PSObject.Properties.Match('placeholders').Count) { $stdCfg.placeholders } else { $defaultPlaceholders }
 
     $dayIndex = @{ Mon=1; Tue=2; Wed=3; Thu=4; Fri=5 }
     foreach ($t in $schedule) {

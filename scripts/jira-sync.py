@@ -418,11 +418,15 @@ def update_excel(file_path: str, insertions: dict) -> int:
 _DAY_COLS = (4, 5, 6, 7, 8)  # Mon..Fri
 _COL_LETTER = {4: "D", 5: "E", 6: "F", 7: "G", 8: "H"}
 
-# Pastel accents for the check-sum row.
-_PASTEL_BLUE = "BDD7EE"   # check-sum label fill
-_PASTEL_GREEN = "C6EFCE"  # a day that totals exactly 8h
-_PASTEL_RED = "FFC7CE"    # a day that totals under or over 8h
-_BLACK = "000000"         # standard font color, always — only the fill changes
+# Pastel accents for the check-sum row. openpyxl's Color pads a 6-digit RGB
+# string with an "00" (fully transparent) alpha byte, not "FF" (opaque) —
+# harmless for a cell's own .fill (Excel ignores alpha there) but conditional-
+# formatting dxf fills honor it, so an unprefixed color is invisible in a CF
+# rule. Always spell these out as 8-digit ARGB with an explicit FF alpha.
+_PASTEL_BLUE = "FFBDD7EE"   # check-sum label fill
+_PASTEL_GREEN = "FFC6EFCE"  # a day that totals exactly 8h
+_PASTEL_RED = "FFFFC7CE"    # a day that totals under or over 8h
+_BLACK = "FF000000"         # standard font color, always — only the fill changes
 
 
 def _write_check_sum(ws, row: int, first_task_row: int, last_task_row: int) -> None:

@@ -364,12 +364,12 @@ function Show-Settings {
     $tabs.TabPages.AddRange(@($tabConn, $tabStd, $tabJql))
 
     $jqlSlots = @(
-        @{ key='investigation';      label='1. Investigation issues' },
-        @{ key='bug_verification';   label='2. Bug verification' },
-        @{ key='story_creation';     label='3. User story creation' },
-        @{ key='functional_testing'; label='4. Functional testing' },
-        @{ key='regression_testing'; label='5. Regression testing' },
-        @{ key='other_qa';           label='6. Other QA activities' }
+        @{ key='investigation' },
+        @{ key='bug_verification' },
+        @{ key='story_creation' },
+        @{ key='functional_testing' },
+        @{ key='regression_testing' },
+        @{ key='other_qa' }
     )
     $defaultJql = @{
         investigation      = 'project = {project} AND issuetype = Bug AND created >= "{ws}" AND created <= "{we}" AND (creator = {account_id} OR reporter = {account_id}) ORDER BY priority DESC, issuetype ASC, key ASC'
@@ -385,6 +385,39 @@ function Show-Settings {
     if ($jqlCfg -and $jqlCfg.queries) {
         foreach ($q in $jqlCfg.queries) { if ($jqlValues.ContainsKey($q.key) -and $q.jql) { $jqlValues[$q.key] = $q.jql } }
     }
+
+    $modeDisplay = @{ count='Total count'; priority='Priority breakdown (P1-P3)'; per_issue='One row per issue' }
+    $modeValue   = @{ 'Total count'='count'; 'Priority breakdown (P1-P3)'='priority'; 'One row per issue'='per_issue' }
+    $modeHint = @{
+        count     = 'Placeholders: {count}'
+        priority  = 'Placeholders: {P1} {P2} {P3} {count} {buckets}'
+        per_issue = 'Placeholders: {key} {summary} {number}'
+    }
+
+    $defaultNameRules = @{
+        investigation      = @{ mode='count';     template='Investigation issue {count}' }
+        bug_verification   = @{ mode='priority';  template='Bug verification {buckets}' }
+        story_creation     = @{ mode='count';     template='User story creation {count}' }
+        functional_testing = @{ mode='per_issue'; template='Functional testing of story ID {key}' }
+        regression_testing = @{ mode='per_issue'; template='Regression testing {number} test items' }
+    }
+    $nameRuleValues = @{}
+    foreach ($k in $defaultNameRules.Keys) { $nameRuleValues[$k] = @{ mode=$defaultNameRules[$k].mode; template=$defaultNameRules[$k].template } }
+    if ($jqlCfg -and $jqlCfg.PSObject.Properties.Match('name_rules').Count -and $jqlCfg.name_rules) {
+        foreach ($prop in $jqlCfg.name_rules.PSObject.Properties) {
+            $k = $prop.Name
+            if (-not $nameRuleValues.ContainsKey($k)) { continue }
+            $cfg = $prop.Value
+            $m = [string]$cfg.mode
+            if ($modeDisplay.ContainsKey($m)) { $nameRuleValues[$k].mode = $m }
+            if ($cfg.template) { $nameRuleValues[$k].template = [string]$cfg.template }
+        }
+    }
+
+    $otherQaLabel = 'Other QA activities (auto-named by keyword rules)'
+    $otherQaHint = 'Automation test creation/update/maintenance, Checklist creation/update, Backlog refinement, Debugging, Maintenance, Other project documentation work, or [REVIEW] fallback'
+
+    $jqlTips = New-Object System.Windows.Forms.ToolTip
 
     $panelJqlFlow = New-Object System.Windows.Forms.FlowLayoutPanel
     $panelJqlFlow.Location = New-Object System.Drawing.Point(0,0)
@@ -479,7 +512,15 @@ function Show-Settings {
 
     foreach ($slot in $jqlSlots) {
         if ($hiddenBuiltin.ContainsKey($slot.key)) { continue }
-        New-JqlRow $slot.key $slot.label ([string]$jqlValues[$slot.key]) $false
+        if ($slot.key -eq 'other_qa') {
+            $r = New-JqlRow $slot.key $otherQaLabel ([string]$jqlValues[$slot.key]) $false
+            $lbl = $r.Controls.Find('titleBox',$false)[0]
+            $lbl.AutoEllipsis = $true
+            $jqlTips.SetToolTip($lbl, $otherQaHint)
+        } else {
+            $rule = $nameRuleValues[$slot.key]
+            New-JqlRow $slot.key $rule.template ([string]$jqlValues[$slot.key]) $true $rule.mode
+        }
     }
 
     if ($jqlCfg -and $jqlCfg.queries) {
@@ -627,17 +668,28 @@ function Show-Settings {
 
     $script:SaveJqlConfig = {
         $queries = @()
+        $nameRules = @{}
         $fixedKeys = @($jqlSlots | ForEach-Object { $_.key })
+        $templatableKeys = @($fixedKeys | Where-Object { $_ -ne 'other_qa' })
         $presentFixed = @{}
         foreach ($row in $panelJqlFlow.Controls) {
-            $title = [string]$row.Controls[0].Text
-            $jql   = [string]$row.Controls[1].Text
+            $titleCtl = $row.Controls.Find('titleBox',$false)[0]
+            $jqlCtl   = $row.Controls.Find('jqlBox',$false)[0]
+            $title = [string]$titleCtl.Text
+            $jql   = [string]$jqlCtl.Text
             if ($fixedKeys -contains $row.Tag) { $presentFixed[$row.Tag] = $true }
             if ([string]::IsNullOrWhiteSpace($title) -and [string]::IsNullOrWhiteSpace($jql)) { continue }
             $queries += @{ key=$row.Tag; label=$title; jql=$jql }
+            if ($templatableKeys -contains $row.Tag) {
+                $comboMatches = $row.Controls.Find('modeCombo',$false)
+                if ($comboMatches.Count -gt 0) {
+                    $mode = $modeValue[[string]$comboMatches[0].SelectedItem]
+                    $nameRules[$row.Tag] = @{ mode=$mode; template=$title }
+                }
+            }
         }
         $hidden = @($fixedKeys | Where-Object { -not $presentFixed.ContainsKey($_) })
-        Write-JsonConfig 'jql_queries.json' @{ queries=$queries; hidden_builtin=$hidden }
+        Write-JsonConfig 'jql_queries.json' @{ queries=$queries; hidden_builtin=$hidden; name_rules=$nameRules }
     }
 
     function Add-Row($parent, $label, $y, $pw = $false) {

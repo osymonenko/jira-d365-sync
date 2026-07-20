@@ -355,13 +355,15 @@ function Show-Settings {
     $tabs.Size = New-Object System.Drawing.Size(596,430)
     [void]$dlg.Controls.Add($tabs)
 
-    $tabConn = New-Object System.Windows.Forms.TabPage; $tabConn.Text = 'Connection'
-    $tabStd  = New-Object System.Windows.Forms.TabPage; $tabStd.Text  = 'Standard tasks'
-    $tabJql  = New-Object System.Windows.Forms.TabPage; $tabJql.Text  = 'Jira queries'
-    $tabConn.BackColor = [System.Drawing.Color]::White
-    $tabStd.BackColor  = [System.Drawing.Color]::White
-    $tabJql.BackColor  = [System.Drawing.Color]::White
-    $tabs.TabPages.AddRange(@($tabConn, $tabStd, $tabJql))
+    $tabConn  = New-Object System.Windows.Forms.TabPage; $tabConn.Text  = 'Connection'
+    $tabStd   = New-Object System.Windows.Forms.TabPage; $tabStd.Text   = 'Standard tasks'
+    $tabJql   = New-Object System.Windows.Forms.TabPage; $tabJql.Text   = 'Jira queries'
+    $tabLinks = New-Object System.Windows.Forms.TabPage; $tabLinks.Text = 'Links'
+    $tabConn.BackColor  = [System.Drawing.Color]::White
+    $tabStd.BackColor   = [System.Drawing.Color]::White
+    $tabJql.BackColor   = [System.Drawing.Color]::White
+    $tabLinks.BackColor = [System.Drawing.Color]::White
+    $tabs.TabPages.AddRange(@($tabConn, $tabStd, $tabJql, $tabLinks))
 
     $jqlSlots = @(
         @{ key='investigation' },
@@ -734,18 +736,18 @@ function Show-Settings {
     $lblAcctHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
     [void]$tabConn.Controls.Add($lblAcctHint)
 
-    # ---- Excel file row ----
+    # ---- Excel file row (Links tab) ----
     $lblEx = New-Object System.Windows.Forms.Label
-    $lblEx.Text = 'Excel file:'; $lblEx.Location = New-Object System.Drawing.Point(16,237)
+    $lblEx.Text = 'Excel file:'; $lblEx.Location = New-Object System.Drawing.Point(16,19)
     $lblEx.Size = New-Object System.Drawing.Size(90,20); $lblEx.TextAlign = 'MiddleRight'
-    [void]$tabConn.Controls.Add($lblEx)
+    [void]$tabLinks.Controls.Add($lblEx)
     $tExcel = New-Object System.Windows.Forms.TextBox
-    $tExcel.Location = New-Object System.Drawing.Point(114,234)
+    $tExcel.Location = New-Object System.Drawing.Point(114,16)
     $tExcel.Size = New-Object System.Drawing.Size(354,24)
     $tExcel.Text = $txtFile.Text
-    [void]$tabConn.Controls.Add($tExcel)
+    [void]$tabLinks.Controls.Add($tExcel)
     $btnExBrowse = New-Object System.Windows.Forms.Button
-    $btnExBrowse.Text = '...'; $btnExBrowse.Location = New-Object System.Drawing.Point(474,234)
+    $btnExBrowse.Text = '...'; $btnExBrowse.Location = New-Object System.Drawing.Point(474,16)
     $btnExBrowse.Size = New-Object System.Drawing.Size(30,24); $btnExBrowse.FlatStyle = 'Flat'
     $btnExBrowse.Add_Click({
         $fd = New-Object System.Windows.Forms.OpenFileDialog
@@ -753,17 +755,27 @@ function Show-Settings {
         $fd.InitialDirectory = Split-Path $tExcel.Text -Parent
         if ($fd.ShowDialog() -eq 'OK') { $tExcel.Text = $fd.FileName }
     })
-    [void]$tabConn.Controls.Add($btnExBrowse)
+    [void]$tabLinks.Controls.Add($btnExBrowse)
+
+    # ---- QAE reporting rules link ----
+    $lnkQae = New-Object System.Windows.Forms.LinkLabel
+    $lnkQae.Text = 'QAE Reporting Rules (SharePoint)'
+    $lnkQae.Location = New-Object System.Drawing.Point(16,56)
+    $lnkQae.Size = New-Object System.Drawing.Size(320,20)
+    $lnkQae.Add_LinkClicked({
+        Start-Process 'https://sitrusllc.sharepoint.com/sites/amcwiki/CompanyRulesandPolicies/Pages/QADPOReportingRules.aspx'
+    })
+    [void]$tabLinks.Controls.Add($lnkQae)
 
     $lblTest = New-Object System.Windows.Forms.Label
-    $lblTest.Location = New-Object System.Drawing.Point(16,272)
+    $lblTest.Location = New-Object System.Drawing.Point(16,237)
     $lblTest.Size = New-Object System.Drawing.Size(460,20)
     $lblTest.ForeColor = [System.Drawing.Color]::Gray
     [void]$tabConn.Controls.Add($lblTest)
 
     $btnT = New-Object System.Windows.Forms.Button
     $btnT.Text = 'Test Connection'
-    $btnT.Location = New-Object System.Drawing.Point(16,296)
+    $btnT.Location = New-Object System.Drawing.Point(16,261)
     $btnT.Size = New-Object System.Drawing.Size(140,32)
     $btnT.Add_Click({
         $lblTest.Text = 'Testing...'; $lblTest.ForeColor = [System.Drawing.Color]::DodgerBlue

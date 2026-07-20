@@ -5,8 +5,17 @@ $script:weekCheckboxes = @()
 $tProj = New-Object System.Windows.Forms.TextBox; $tProj.Text = 'GT2'
 $tAcct = New-Object System.Windows.Forms.TextBox; $tAcct.Text = 'ACC123'
 $panelJqlFlow = New-Object System.Windows.Forms.FlowLayoutPanel
+$jqlTips = New-Object System.Windows.Forms.ToolTip
 
-function New-JqlRow($key, $titleText, $jqlText, $titleEditable) {
+$modeDisplay = @{ count='Total count'; priority='Priority breakdown (P1-P3)'; per_issue='One row per issue' }
+$modeValue   = @{ 'Total count'='count'; 'Priority breakdown (P1-P3)'='priority'; 'One row per issue'='per_issue' }
+$modeHint = @{
+    count     = 'Placeholders: {count}'
+    priority  = 'Placeholders: {P1} {P2} {P3} {count} {buckets}'
+    per_issue = 'Placeholders: {key} {summary} {number}'
+}
+
+function New-JqlRow($key, $titleText, $jqlText, $titleEditable, $modeKey = $null) {
     $row = New-Object System.Windows.Forms.Panel
     $row.Size = New-Object System.Drawing.Size(566,74)
     $row.Margin = New-Object System.Windows.Forms.Padding(4,4,4,0)
@@ -17,12 +26,34 @@ function New-JqlRow($key, $titleText, $jqlText, $titleEditable) {
     } else {
         $titleCtl = New-Object System.Windows.Forms.Label
     }
+    $titleCtl.Name = 'titleBox'
     $titleCtl.Text = $titleText; $titleCtl.Location = New-Object System.Drawing.Point(0,0)
-    $titleCtl.Size = New-Object System.Drawing.Size(420,18)
+    $titleWidth = if ($modeKey) { 260 } else { 420 }
+    $titleCtl.Size = New-Object System.Drawing.Size($titleWidth,18)
     $titleCtl.Font = New-Object System.Drawing.Font('Segoe UI',9,[System.Drawing.FontStyle]::Bold)
     [void]$row.Controls.Add($titleCtl)
 
+    if ($modeKey) {
+        $combo = New-Object System.Windows.Forms.ComboBox
+        $combo.Name = 'modeCombo'
+        $combo.DropDownStyle = 'DropDownList'
+        $combo.Location = New-Object System.Drawing.Point(264,0)
+        $combo.Size = New-Object System.Drawing.Size(156,20)
+        $combo.Font = New-Object System.Drawing.Font('Segoe UI',8)
+        [void]$combo.Items.AddRange(@('Total count','Priority breakdown (P1-P3)','One row per issue'))
+        $combo.SelectedItem = $modeDisplay[$modeKey]
+        $jqlTips.SetToolTip($titleCtl, $modeHint[$modeKey])
+        $jqlTips.SetToolTip($combo, [string]$combo.SelectedItem)
+        $combo.Add_SelectedIndexChanged({
+            $newMode = $modeValue[[string]$this.SelectedItem]
+            $jqlTips.SetToolTip($this.Parent.Controls.Find('titleBox',$false)[0], $modeHint[$newMode])
+            $jqlTips.SetToolTip($this, [string]$this.SelectedItem)
+        })
+        [void]$row.Controls.Add($combo)
+    }
+
     $box = New-Object System.Windows.Forms.TextBox
+    $box.Name = 'jqlBox'
     $box.Multiline = $true; $box.ScrollBars = 'Vertical'; $box.WordWrap = $true
     $box.Location = New-Object System.Drawing.Point(0,20); $box.Size = New-Object System.Drawing.Size(420,44)
     $box.Font = New-Object System.Drawing.Font('Consolas',8)
@@ -33,7 +64,7 @@ function New-JqlRow($key, $titleText, $jqlText, $titleEditable) {
     $btnCopy.Text = 'Copy'; $btnCopy.Location = New-Object System.Drawing.Point(424,20); $btnCopy.Size = New-Object System.Drawing.Size(60,21)
     $btnCopy.FlatStyle = 'Flat'
     $btnCopy.Add_Click({
-        $tpl = [string]$this.Parent.Controls[1].Text
+        $tpl = [string]$this.Parent.Controls.Find('jqlBox',$false)[0].Text
         $proj = if ($tProj.Text) { $tProj.Text } else { 'GT2' }
         $acct = $tAcct.Text
         $checked = @($script:weekCheckboxes | Where-Object { $_.Checked } | ForEach-Object { $_.Tag })
@@ -67,32 +98,42 @@ function Check($name, $cond) {
     if ($cond) { Write-Host "  OK $name" } else { $script:failures += $name; Write-Host "  FAIL $name" }
 }
 
-# --- fixed-shaped row (titleEditable=$false), no {ws}/{we}/{account_id} needed for a stable assert ---
-$fixedRow = New-JqlRow 'investigation' '1. Investigation issues' 'project = {project} AND creator = {account_id}' $false
-[System.Windows.Forms.Clipboard]::SetText('')
-$fixedRow.Controls[2].PerformClick()   # Copy
-$clipFixed = [System.Windows.Forms.Clipboard]::GetText()
-Check "fixed row Copy substitutes project/account" ($clipFixed -eq 'project = GT2 AND creator = ACC123')
+function Get-Copy($row) { ($row.Controls | Where-Object { $_ -is [System.Windows.Forms.Button] -and $_.Text -eq 'Copy' })[0] }
+function Get-Delete($row) { ($row.Controls | Where-Object { $_ -is [System.Windows.Forms.Button] -and $_.Text -eq 'Delete' })[0] }
 
-# --- custom-shaped row (titleEditable=$true) ---
+# --- fixed-shaped row (titleEditable=$false, no mode), e.g. other_qa ---
+$fixedRow = New-JqlRow 'other_qa' 'Other QA activities (auto-named by keyword rules)' 'project = {project} AND creator = {account_id}' $false
+Check "fixed row has no mode combo" ($fixedRow.Controls.Find('modeCombo',$false).Count -eq 0)
+[System.Windows.Forms.Clipboard]::SetText('')
+(Get-Copy $fixedRow).PerformClick()
+Check "fixed row Copy substitutes project/account" ([System.Windows.Forms.Clipboard]::GetText() -eq 'project = GT2 AND creator = ACC123')
+
+# --- custom-shaped row (titleEditable=$true, no mode) ---
 $customRow = New-JqlRow 'extra_ab12cd34' 'My query' 'project = {project} custom' $true
+Check "custom row has no mode combo" ($customRow.Controls.Find('modeCombo',$false).Count -eq 0)
 [System.Windows.Forms.Clipboard]::SetText('')
-$customRow.Controls[2].PerformClick()  # Copy
-$clipCustom = [System.Windows.Forms.Clipboard]::GetText()
-Check "custom row Copy substitutes project" ($clipCustom -eq 'project = GT2 custom')
+(Get-Copy $customRow).PerformClick()
+Check "custom row Copy substitutes project" ([System.Windows.Forms.Clipboard]::GetText() -eq 'project = GT2 custom')
 
-# --- Delete removes the row from the panel, for both shapes ---
-$countBeforeFixed = $panelJqlFlow.Controls.Count
-$fixedRow.Controls[3].PerformClick()   # Delete
-Check "fixed row Delete removes it from the panel" (
-    $panelJqlFlow.Controls.Count -eq ($countBeforeFixed - 1) -and -not $panelJqlFlow.Controls.Contains($fixedRow)
-)
+# --- templatable row (titleEditable=$true, modeKey set), e.g. bug_verification ---
+$tplRow = New-JqlRow 'bug_verification' 'Bug verification {buckets}' 'project = {project} custom' $true 'priority'
+$combo = $tplRow.Controls.Find('modeCombo',$false)[0]
+Check "templatable row has mode combo pre-selected" ([string]$combo.SelectedItem -eq 'Priority breakdown (P1-P3)')
+Check "templatable row title tooltip matches priority hint" ($jqlTips.GetToolTip($tplRow.Controls.Find('titleBox',$false)[0]) -eq 'Placeholders: {P1} {P2} {P3} {count} {buckets}')
+$combo.SelectedItem = 'Total count'
+Check "changing mode updates title tooltip" ($jqlTips.GetToolTip($tplRow.Controls.Find('titleBox',$false)[0]) -eq 'Placeholders: {count}')
+[System.Windows.Forms.Clipboard]::SetText('')
+(Get-Copy $tplRow).PerformClick()
+Check "templatable row Copy still substitutes JQL box, not the template text" ([System.Windows.Forms.Clipboard]::GetText() -eq 'project = GT2 custom')
 
-$countBeforeCustom = $panelJqlFlow.Controls.Count
-$customRow.Controls[3].PerformClick()  # Delete
-Check "custom row Delete removes it from the panel" (
-    $panelJqlFlow.Controls.Count -eq ($countBeforeCustom - 1) -and -not $panelJqlFlow.Controls.Contains($customRow)
-)
+# --- Delete removes the row from the panel, for all three shapes ---
+foreach ($r in @($fixedRow, $customRow, $tplRow)) {
+    $countBefore = $panelJqlFlow.Controls.Count
+    (Get-Delete $r).PerformClick()
+    Check "Delete removes row '$($r.Tag)' from the panel" (
+        $panelJqlFlow.Controls.Count -eq ($countBefore - 1) -and -not $panelJqlFlow.Controls.Contains($r)
+    )
+}
 
 if ($script:failures.Count -gt 0) {
     Write-Host "FAILURES: $($script:failures -join ', ')"

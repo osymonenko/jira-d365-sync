@@ -394,7 +394,7 @@ function Show-Settings {
     $panelJqlFlow.AutoScroll = $true
     [void]$tabJql.Controls.Add($panelJqlFlow)
 
-    function New-JqlRow($key, $titleText, $jqlText, $titleEditable) {
+    function New-JqlRow($key, $titleText, $jqlText, $titleEditable, $modeKey = $null) {
         $row = New-Object System.Windows.Forms.Panel
         $row.Size = New-Object System.Drawing.Size(566,74)
         $row.Margin = New-Object System.Windows.Forms.Padding(4,4,4,0)
@@ -405,12 +405,34 @@ function Show-Settings {
         } else {
             $titleCtl = New-Object System.Windows.Forms.Label
         }
+        $titleCtl.Name = 'titleBox'
         $titleCtl.Text = $titleText; $titleCtl.Location = New-Object System.Drawing.Point(0,0)
-        $titleCtl.Size = New-Object System.Drawing.Size(420,18)
+        $titleWidth = if ($modeKey) { 260 } else { 420 }
+        $titleCtl.Size = New-Object System.Drawing.Size($titleWidth,18)
         $titleCtl.Font = New-Object System.Drawing.Font('Segoe UI',9,[System.Drawing.FontStyle]::Bold)
         [void]$row.Controls.Add($titleCtl)
 
+        if ($modeKey) {
+            $combo = New-Object System.Windows.Forms.ComboBox
+            $combo.Name = 'modeCombo'
+            $combo.DropDownStyle = 'DropDownList'
+            $combo.Location = New-Object System.Drawing.Point(264,0)
+            $combo.Size = New-Object System.Drawing.Size(156,20)
+            $combo.Font = New-Object System.Drawing.Font('Segoe UI',8)
+            [void]$combo.Items.AddRange(@('Total count','Priority breakdown (P1-P3)','One row per issue'))
+            $combo.SelectedItem = $modeDisplay[$modeKey]
+            $jqlTips.SetToolTip($titleCtl, $modeHint[$modeKey])
+            $jqlTips.SetToolTip($combo, [string]$combo.SelectedItem)
+            $combo.Add_SelectedIndexChanged({
+                $newMode = $modeValue[[string]$this.SelectedItem]
+                $jqlTips.SetToolTip($this.Parent.Controls.Find('titleBox',$false)[0], $modeHint[$newMode])
+                $jqlTips.SetToolTip($this, [string]$this.SelectedItem)
+            })
+            [void]$row.Controls.Add($combo)
+        }
+
         $box = New-Object System.Windows.Forms.TextBox
+        $box.Name = 'jqlBox'
         $box.Multiline = $true; $box.ScrollBars = 'Vertical'; $box.WordWrap = $true
         $box.Location = New-Object System.Drawing.Point(0,20); $box.Size = New-Object System.Drawing.Size(420,44)
         $box.Font = New-Object System.Drawing.Font('Consolas',8)
@@ -421,7 +443,7 @@ function Show-Settings {
         $btnCopy.Text = 'Copy'; $btnCopy.Location = New-Object System.Drawing.Point(424,20); $btnCopy.Size = New-Object System.Drawing.Size(60,21)
         $btnCopy.FlatStyle = 'Flat'
         $btnCopy.Add_Click({
-            $tpl = [string]$this.Parent.Controls[1].Text
+            $tpl = [string]$this.Parent.Controls.Find('jqlBox',$false)[0].Text
             $proj = if ($tProj.Text) { $tProj.Text } else { 'GT2' }
             $acct = $tAcct.Text
             $checked = @($script:weekCheckboxes | Where-Object { $_.Checked } | ForEach-Object { $_.Tag })

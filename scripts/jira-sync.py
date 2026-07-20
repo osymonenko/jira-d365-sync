@@ -216,6 +216,94 @@ def choose_automation_name(summary: str, key: str) -> str:
     return f"[REVIEW] {summary[:50]} ({key})"
 
 
+DEFAULT_NAME_RULES = {
+    "investigation":      {"mode": "count",     "template": "Investigation issue {count}"},
+    "bug_verification":   {"mode": "priority",  "template": "Bug verification {buckets}"},
+    "story_creation":     {"mode": "count",     "template": "User story creation {count}"},
+    "functional_testing": {"mode": "per_issue", "template": "Functional testing of story ID {key}"},
+    "regression_testing": {"mode": "per_issue", "template": "Regression testing {number} test items"},
+}
+
+_VALID_MODES = {"count", "priority", "per_issue"}
+
+
+def load_name_rules() -> dict:
+    """Return {key: {"mode", "template"}} for the 5 templatable query keys,
+    overlaying config/jql_queries.json's "name_rules" onto DEFAULT_NAME_RULES.
+    An invalid mode or a blank template for a key keeps that field's default;
+    missing/invalid config keeps everything default."""
+    rules = {k: dict(v) for k, v in DEFAULT_NAME_RULES.items()}
+    path = _CONFIG_DIR / "jql_queries.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for key, cfg in (data.get("name_rules") or {}).items():
+            if key not in rules or not isinstance(cfg, dict):
+                continue
+            mode = cfg.get("mode")
+            if mode in _VALID_MODES:
+                rules[key]["mode"] = mode
+            template = cfg.get("template")
+            if isinstance(template, str) and template.strip():
+                rules[key]["template"] = template
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"[WARN] Invalid config/jql_queries.json name_rules ({e}); using defaults", flush=True)
+    return rules
+
+
+def _count_ctx(issues: list) -> dict:
+    return {"count": len(issues)}
+
+
+def _priority_ctx(issues: list) -> dict:
+    buckets = {"P1": 0, "P2": 0, "P3": 0}
+    for iss in issues:
+        p = iss["fields"].get("priority", {}).get("name", "Medium")
+        buckets[priority_bucket(p)] += 1
+    parts = [f"{k}-{v}" for k, v in buckets.items() if v > 0]
+    return {**buckets, "count": len(issues), "buckets": ", ".join(parts)}
+
+
+def _per_issue_ctx(iss: dict) -> dict:
+    summary = iss["fields"]["summary"]
+    return {"key": iss["key"], "summary": summary, "number": extract_last_number(summary) or ""}
+
+
+def render_name(template: str, ctx: dict, default_template: str) -> str:
+    """Render `template` against `ctx`; on a bad/unknown placeholder, log a
+    warning and fall back to `default_template` (always safe for `ctx`)."""
+    try:
+        return template.format(**ctx)
+    except (KeyError, IndexError, ValueError) as e:
+        print(f"[WARN] Invalid name_template ({e}); using default", flush=True)
+        return default_template.format(**ctx)
+
+
+def build_names(mode: str, issues: list, template: str, default_template: str, key: str | None = None) -> list[str]:
+    """Return one name per Excel row to insert: a single name for "count"/
+    "priority" modes (empty list if no issues), or one name per issue for
+    "per_issue". For key == "regression_testing" specifically, a per-issue
+    result with no extractable {number} is overridden with the fixed
+    [REVIEW] fallback, matching the tool's pre-existing behavior."""
+    if not issues:
+        return []
+    if mode == "count":
+        return [render_name(template, _count_ctx(issues), default_template)]
+    if mode == "priority":
+        return [render_name(template, _priority_ctx(issues), default_template)]
+    if mode == "per_issue":
+        names = []
+        for iss in issues:
+            ctx = _per_issue_ctx(iss)
+            name = render_name(template, ctx, default_template)
+            if key == "regression_testing" and not ctx["number"]:
+                name = f"Regression testing [REVIEW] {iss['key']}"
+            names.append(name)
+        return names
+    raise ValueError(f"unknown naming mode {mode!r}")
+
+
 def generate_week_rows(
     base_url: str, email: str, token: str, account_id: str,
     project: str, week_start: date, week_end: date,

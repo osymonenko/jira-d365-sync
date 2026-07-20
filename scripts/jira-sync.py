@@ -312,6 +312,7 @@ def generate_week_rows(
     rows: list[tuple[str, str]] = []
 
     templates = load_jql()
+    name_rules = load_name_rules()
 
     def build(key):
         return templates[key].format(project=project, account_id=account_id, ws=ws, we=we)
@@ -322,40 +323,40 @@ def generate_week_rows(
     def issue_url(key: str) -> str:
         return f"{base_url}/browse/{key}"
 
+    def names_for(key: str, issues: list) -> list[str]:
+        rule = name_rules[key]
+        default_template = DEFAULT_NAME_RULES[key]["template"]
+        return build_names(rule["mode"], issues, rule["template"], default_template, key=key)
+
     # 1. Investigation issue — bugs created this week that the user filed
     #    (creator) or is the reporter of. In Jira creator (who clicked "Create")
     #    and reporter (who the bug is attributed to) can differ, so match either.
     jql = build("investigation")
     issues = search_jira(base_url, email, token, jql)
-    if issues:
-        name = f"Investigation issue {len(issues)}"
-        print(f"  [1/6] Investigation issues (bugs you created/reported this week): {len(issues)} found → \"{name}\"", flush=True)
-        rows.append((name, search_url(jql)))
+    names = names_for("investigation", issues)
+    if names:
+        print(f"  [1/6] Investigation issues (bugs you created/reported this week): {len(issues)} found → \"{names[0]}\"", flush=True)
+        rows.append((names[0], search_url(jql)))
     else:
         print(f"  [1/6] Investigation issues (bugs you created/reported this week): 0 found", flush=True)
 
     # 2. Bug verification — count by priority bucket
     jql = build("bug_verification")
     issues = search_jira(base_url, email, token, jql)
-    if issues:
-        buckets: dict[str, int] = {"P1": 0, "P2": 0, "P3": 0}
-        for iss in issues:
-            p = iss["fields"].get("priority", {}).get("name", "Medium")
-            buckets[priority_bucket(p)] += 1
-        parts = [f"{k}-{v}" for k, v in buckets.items() if v > 0]
-        name = f"Bug verification {', '.join(parts)}"
-        print(f"  [2/6] Bug verification (closed by you): {len(issues)} found → \"{name}\"", flush=True)
-        rows.append((name, search_url(jql)))
+    names = names_for("bug_verification", issues)
+    if names:
+        print(f"  [2/6] Bug verification (closed by you): {len(issues)} found → \"{names[0]}\"", flush=True)
+        rows.append((names[0], search_url(jql)))
     else:
         print(f"  [2/6] Bug verification (closed by you): 0 found", flush=True)
 
     # 3. User story creation — count of stories created under GT2-80
     jql = build("story_creation")
     issues = search_jira(base_url, email, token, jql)
-    if issues:
-        name = f"User story creation {len(issues)}"
-        print(f"  [3/6] User story creation: {len(issues)} found → \"{name}\"", flush=True)
-        rows.append((name, search_url(jql)))
+    names = names_for("story_creation", issues)
+    if names:
+        print(f"  [3/6] User story creation: {len(issues)} found → \"{names[0]}\"", flush=True)
+        rows.append((names[0], search_url(jql)))
     else:
         print(f"  [3/6] User story creation: 0 found", flush=True)
 
@@ -363,8 +364,7 @@ def generate_week_rows(
     jql = build("functional_testing")
     issues = search_jira(base_url, email, token, jql)
     print(f"  [4/6] Functional testing stories: {len(issues)} found", flush=True)
-    for iss in issues:
-        name = f"Functional testing of story ID {iss['key']}"
+    for iss, name in zip(issues, names_for("functional_testing", issues)):
         print(f"         {iss['key']} → \"{name}\"", flush=True)
         rows.append((name, issue_url(iss['key'])))
 
@@ -374,13 +374,13 @@ def generate_week_rows(
     if len(issues) > 1:
         print(f"  [WARN] Regression: {len(issues)} items found (expected 1)", flush=True)
     print(f"  [5/6] Regression testing: {len(issues)} found", flush=True)
-    for iss in issues:
-        n = extract_last_number(iss["fields"]["summary"])
-        name = f"Regression testing {n} test items" if n else f"Regression testing [REVIEW] {iss['key']}"
+    for iss, name in zip(issues, names_for("regression_testing", issues)):
         print(f"         {iss['key']} → \"{name}\"", flush=True)
         rows.append((name, issue_url(iss['key'])))
 
-    # 6. Other QA activities (GT2-73, non-smoke/regression/functional) — direct issue link
+    # 6. Other QA activities (GT2-73, non-smoke/regression/functional) — direct
+    #    issue link. Naming stays hardcoded (keyword classification), not
+    #    driven by name_rules — see choose_automation_name.
     jql = build("other_qa")
     issues = search_jira(base_url, email, token, jql)
     print(f"  [6/6] Other QA activities ({project}-73 subtasks): {len(issues)} found", flush=True)

@@ -1,3 +1,3 @@
 @echo off
 cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0gui.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0jira-sync.ps1"

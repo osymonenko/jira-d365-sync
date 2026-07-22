@@ -873,7 +873,26 @@ function Start-PyProc($args_, $onDone, $exe = 'python') {
     $psi.CreateNoWindow = $true
     $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
     $psi.StandardErrorEncoding  = [System.Text.Encoding]::UTF8
-    $script:proc = [System.Diagnostics.Process]::Start($psi)
+    try {
+        $script:proc = [System.Diagnostics.Process]::Start($psi)
+    } catch {
+        # Process.Start throws Win32Exception "The system cannot find the file
+        # specified" when the runtime ($exe) is not installed / not on PATH.
+        # Turn that raw stack trace into an actionable message.
+        $hint = if ($exe -eq 'node') {
+            "Node.js is not installed (or not on PATH). Install it from https://nodejs.org , then open a terminal in this folder and run:  npm install"
+        } elseif ($exe -eq 'python') {
+            "Python is not installed (or not on PATH). Install it from https://python.org (tick 'Add python.exe to PATH'), then run:  pip install openpyxl"
+        } else {
+            "Cannot start '$exe' — it is not installed or not on PATH."
+        }
+        Append-Log ("[ERROR] Cannot start '$exe': " + $_.Exception.Message)
+        Append-Log ("[FIX]   $hint")
+        Set-Status ("'$exe' not found — see log (install $exe)") ([System.Drawing.Color]::OrangeRed)
+        [void][System.Windows.Forms.MessageBox]::Show($hint, "$exe not found", 'OK', 'Warning')
+        $btnStop.Enabled = $false
+        return
+    }
     $script:onDone = $onDone
     $btnStop.Enabled = $true
 
@@ -1055,6 +1074,15 @@ $btnFillStd.Add_Click({
 $btnSubmit.Add_Click({
     if (-not (Test-Path $txtFile.Text)) {
         [System.Windows.Forms.MessageBox]::Show('Excel file not found: ' + $txtFile.Text, 'Error', 'OK', 'Warning') | Out-Null
+        return
+    }
+    # A ZIP download does not include node_modules (it's gitignored). Without it,
+    # `node --require ts-node/register ...` fails with a cryptic module error, so
+    # surface the real fix up-front.
+    if (-not (Test-Path (Join-Path $scriptDir 'node_modules'))) {
+        $m = "Dependencies are not installed (node_modules is missing).`n`nOpen a terminal in`n$scriptDir`nand run:  npm install`n`n(Requires Node.js from https://nodejs.org)"
+        [void][System.Windows.Forms.MessageBox]::Show($m, 'Setup required', 'OK', 'Warning')
+        Set-Status 'node_modules missing — run "npm install" (see popup)' ([System.Drawing.Color]::OrangeRed)
         return
     }
     # @() ensures result is always an array even when pipeline yields a single item.

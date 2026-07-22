@@ -30,7 +30,9 @@ function Save-JiraEnv($url, $email, $token, $project, $accountId, $excelFile, $s
         }
     }
     foreach ($k in $keys) { if (-not $written[$k]) { $lines += "$k=$($vals[$k])" } }
-    $lines | Set-Content $envFile -Encoding utf8
+    # Write without BOM — Windows PowerShell 5.1 'Set-Content -Encoding utf8' prepends a
+    # UTF-8 BOM that corrupts the first key when the Python side reads the file (see load_env).
+    [System.IO.File]::WriteAllText($envFile, (($lines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
 }
 
 $configDir = Join-Path $scriptDir 'config'

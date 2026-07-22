@@ -16,9 +16,9 @@ function Read-EnvFile {
     return $h
 }
 
-function Save-JiraEnv($url, $email, $token, $project, $accountId, $excelFile, $sprintAnchor, $sprintLengthWeeks, $copyToBillable) {
-    $keys = @('JIRA_URL','JIRA_EMAIL','JIRA_API_TOKEN','JIRA_PROJECT','JIRA_ACCOUNT_ID','EXCEL_FILE','SPRINT_ANCHOR','SPRINT_LENGTH_WEEKS','COPY_TO_BILLABLE_DURATION')
-    $vals = @{ JIRA_URL=$url; JIRA_EMAIL=$email; JIRA_API_TOKEN=$token; JIRA_PROJECT=$project; JIRA_ACCOUNT_ID=$accountId; EXCEL_FILE=$excelFile; SPRINT_ANCHOR=$sprintAnchor; SPRINT_LENGTH_WEEKS=$sprintLengthWeeks; COPY_TO_BILLABLE_DURATION=$copyToBillable }
+function Save-JiraEnv($url, $email, $token, $project, $accountId, $excelFile, $sprintAnchor, $sprintLengthWeeks, $copyToBillable, $d365Url) {
+    $keys = @('D365_URL','JIRA_URL','JIRA_EMAIL','JIRA_API_TOKEN','JIRA_PROJECT','JIRA_ACCOUNT_ID','EXCEL_FILE','SPRINT_ANCHOR','SPRINT_LENGTH_WEEKS','COPY_TO_BILLABLE_DURATION')
+    $vals = @{ D365_URL=$d365Url; JIRA_URL=$url; JIRA_EMAIL=$email; JIRA_API_TOKEN=$token; JIRA_PROJECT=$project; JIRA_ACCOUNT_ID=$accountId; EXCEL_FILE=$excelFile; SPRINT_ANCHOR=$sprintAnchor; SPRINT_LENGTH_WEEKS=$sprintLengthWeeks; COPY_TO_BILLABLE_DURATION=$copyToBillable }
     $lines = @(); $written = @{}
     if (Test-Path $envFile) {
         Get-Content $envFile | ForEach-Object {
@@ -710,19 +710,21 @@ function Show-Settings {
     }
 
     $d = Read-EnvFile
-    $tUrl  = Add-Row $tabConn 'Jira URL:'    16
-    $tTok  = Add-Row $tabConn 'API Token:'   54 $true
+    $tD365 = Add-Row $tabConn 'D365 URL:'    16
+    $tUrl  = Add-Row $tabConn 'Jira URL:'    54
+    $tTok  = Add-Row $tabConn 'API Token:'   92 $true
 
     $chkSh = New-Object System.Windows.Forms.CheckBox
-    $chkSh.Text = 'Show token'; $chkSh.Location = New-Object System.Drawing.Point(114,80)
+    $chkSh.Text = 'Show token'; $chkSh.Location = New-Object System.Drawing.Point(114,118)
     $chkSh.Size = New-Object System.Drawing.Size(100,22)
     $chkSh.Add_CheckedChanged({ $tTok.UseSystemPasswordChar = -not $chkSh.Checked })
     [void]$tabConn.Controls.Add($chkSh)
 
-    $tProj = Add-Row $tabConn 'Project key:' 110
-    $tMail = Add-Row $tabConn 'Email:'       148
-    $tAcct = Add-Row $tabConn 'Account ID:'  186
+    $tProj = Add-Row $tabConn 'Project key:' 148
+    $tMail = Add-Row $tabConn 'Email:'       186
+    $tAcct = Add-Row $tabConn 'Account ID:'  224
 
+    $tD365.Text = if ($d['D365_URL'])         { $d['D365_URL'] }         else { 'https://amcbridge.crm.dynamics.com/' }
     $tUrl.Text  = if ($d['JIRA_URL'])        { $d['JIRA_URL'] }        else { 'https://amcbridge.atlassian.net' }
     $tTok.Text  = if ($d['JIRA_API_TOKEN'])   { $d['JIRA_API_TOKEN'] }   else { '' }
     $tProj.Text = if ($d['JIRA_PROJECT'])     { $d['JIRA_PROJECT'] }     else { 'GT2' }
@@ -732,7 +734,7 @@ function Show-Settings {
     # Hint: which Jira user the activity queries (2,3,4,5,6) filter on. Empty = token owner.
     $lblAcctHint = New-Object System.Windows.Forms.Label
     $lblAcctHint.Text = 'Leave empty to use the API-token owner (/myself)'
-    $lblAcctHint.Location = New-Object System.Drawing.Point(114,211)
+    $lblAcctHint.Location = New-Object System.Drawing.Point(114,249)
     $lblAcctHint.Size = New-Object System.Drawing.Size(390,16)
     $lblAcctHint.ForeColor = [System.Drawing.Color]::Gray
     $lblAcctHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
@@ -785,19 +787,19 @@ function Show-Settings {
     [void]$tabLinks.Controls.Add($lblBillHint)
 
     $lblTest = New-Object System.Windows.Forms.Label
-    $lblTest.Location = New-Object System.Drawing.Point(16,237)
+    $lblTest.Location = New-Object System.Drawing.Point(16,275)
     $lblTest.Size = New-Object System.Drawing.Size(460,20)
     $lblTest.ForeColor = [System.Drawing.Color]::Gray
     [void]$tabConn.Controls.Add($lblTest)
 
     $btnT = New-Object System.Windows.Forms.Button
     $btnT.Text = 'Test Connection'
-    $btnT.Location = New-Object System.Drawing.Point(16,261)
+    $btnT.Location = New-Object System.Drawing.Point(16,299)
     $btnT.Size = New-Object System.Drawing.Size(140,32)
     $btnT.Add_Click({
         $lblTest.Text = 'Testing...'; $lblTest.ForeColor = [System.Drawing.Color]::DodgerBlue
         $dlg.Refresh()
-        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text $tSprintLen.Text ($chkBillable.Checked.ToString().ToLower())
+        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text $tSprintLen.Text ($chkBillable.Checked.ToString().ToLower()) $tD365.Text
         $psi2 = New-Object System.Diagnostics.ProcessStartInfo
         $psi2.FileName = 'python'; $psi2.Arguments = "scripts\jira-sync.py --command test --file `"$($tExcel.Text)`""
         $psi2.WorkingDirectory = $scriptDir; $psi2.UseShellExecute = $false
@@ -828,7 +830,7 @@ function Show-Settings {
     $btnSv.BackColor = [System.Drawing.Color]::FromArgb(255,0,122,200)
     $btnSv.ForeColor = [System.Drawing.Color]::White; $btnSv.FlatStyle = 'Flat'
     $btnSv.Add_Click({
-        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text $tSprintLen.Text ($chkBillable.Checked.ToString().ToLower())
+        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text $tSprintLen.Text ($chkBillable.Checked.ToString().ToLower()) $tD365.Text
         & $script:SaveStandardFromGrid
         & $script:SaveJqlConfig
         $txtFile.Text = $tExcel.Text

@@ -2,7 +2,7 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 import { Command } from 'commander';
-import { firstEntriesPerTask, parseTimesheet } from './excel';
+import { firstEntriesPerTask, parseTimesheet, ParseDiagnostics } from './excel';
 import { D365Client } from './d365';
 import { runPreflight } from './preflight';
 import { TimeEntry } from './types';
@@ -44,12 +44,14 @@ async function main(): Promise<void> {
   // --list-tasks: parse Excel and print task names, no browser or D365_URL needed
   if (opts.listTasks) {
     let entries: TimeEntry[];
+    const diag = {} as ParseDiagnostics;
     try {
-      entries = parseTimesheet(opts.file, weekFilter);
+      entries = parseTimesheet(opts.file, weekFilter, diag);
     } catch (err) {
       console.error('Failed to parse Excel file:', (err as Error).message);
       process.exit(1);
     }
+    printParseReport(diag);
     const taskEntries = firstEntriesPerTask(entries);
     if (taskEntries.length === 0) {
       console.log('No tasks found.');
@@ -85,24 +87,42 @@ async function main(): Promise<void> {
     process.exit(preflightOk ? 0 : 1);
   }
 
-  // Parse Excel
-  console.log(`\nReading timesheet: ${opts.file}`);
+  // ── Stage: parse Excel ────────────────────────────────────────────────────
+  console.log(`\n[1/4] Reading timesheet: ${opts.file}`);
+  if (weekFilter) console.log(`      Week filter: --week ${opts.week} (matches the week whose Monday = ${opts.week})`);
+  else console.log(`      Week filter: none (processing all weeks in the file)`);
   let entries: TimeEntry[];
+  const diag = {} as ParseDiagnostics;
   try {
-    entries = parseTimesheet(opts.file, weekFilter);
+    entries = parseTimesheet(opts.file, weekFilter, diag);
   } catch (err) {
-    console.error('Failed to parse Excel file:', (err as Error).message);
+    console.error('      ✗ Failed to parse Excel file:', (err as Error).message);
     process.exit(1);
   }
 
+  // Always report what the parser saw — makes "0 entries" self-explanatory.
+  printParseReport(diag);
+
   if (entries.length === 0) {
-    console.log('No time entries found (all cells are empty or zero). Nothing to submit.');
+    console.log('\n[!] No time entries to submit for this selection. Browser will NOT launch.');
+    if (diag.weekBlocks === 0) {
+      console.log('    Reason: no week blocks were recognised in the sheet. Expected a row whose');
+      console.log('    column A holds a date (week start), followed by task rows (task name in');
+      console.log(`    column C, hours in columns D–H). Sheet read: "${diag.sheetName}", ${diag.totalRows} rows.`);
+    } else if (weekFilter && !diag.weeks.some((w) => w.matchedFilter)) {
+      console.log(`    Reason: no week in the file matches --week ${opts.week}.`);
+      console.log('    The file has these week(s) — submit using one of their dates:');
+      diag.weeks.forEach((w) => console.log(`      • week of ${w.monday} (${w.entries} entr${w.entries === 1 ? 'y' : 'ies'})`));
+    } else {
+      console.log('    Reason: the selected week has task rows but no hour cells > 0');
+      console.log('    (columns D–H must contain numbers, e.g. 0.5, 1, 2).');
+    }
     return;
   }
 
   const stage1Entries = firstEntriesPerTask(entries);
-  console.log(`\nFound ${entries.length} time entries across ${stage1Entries.length} unique task(s):`);
-  stage1Entries.forEach((e) => console.log(`  • ${e.task}`));
+  console.log(`\n[2/4] Found ${entries.length} time entries across ${stage1Entries.length} unique task(s):`);
+  stage1Entries.forEach((e) => console.log(`  • ${e.date} | ${e.task} | ${e.hours}h`));
   // TODO: Stage 2 (оставшиеся дни многодневных задач) будет реализован отдельно
   // через клик по ячейкам в "All Weekly Time Entries" weekly grid — после
   // Stage 1 строки задач уже существуют в гриде, нужно только проставить часы
@@ -113,9 +133,10 @@ async function main(): Promise<void> {
   const logger: Logger = createLogger(runId);
   logger.log(`Run ${runId} started — logs in ${logger.runDir}`);
 
-  // Launch browser
+  // ── Stage: launch browser ─────────────────────────────────────────────────
+  console.log(`\n[3/4] Launching browser (mode: ${browserMode})...`);
+  console.log(`      Copy to Billable Duration: ${copyToBillable ? 'ENABLED (toggles set to Yes)' : 'off (D365 default)'}`);
   const client = new D365Client(d365Url, userDataDir, browserMode, cdpUrl, logger, copyToBillable);
-  if (copyToBillable) console.log('Copy to Billable Duration: enabled (toggles set to Yes)');
   await client.launch();
 
   const results = { created: 0, existing: 0, failed: 0 };
@@ -123,7 +144,7 @@ async function main(): Promise<void> {
 
   try {
     // ── Stage 1: First-day entry per task (with inline task creation) ────────
-    console.log(`\n── Stage 1: Submitting first-day entry for ${stage1Entries.length} task(s) ──`);
+    console.log(`\n[4/4] Stage 1: Submitting first-day entry for ${stage1Entries.length} task(s) ──`);
     for (let i = 0; i < stage1Entries.length; i++) {
       const entry = stage1Entries[i];
       const label = `${entry.date} | ${entry.task} | ${entry.hours}h`;
@@ -163,6 +184,23 @@ async function main(): Promise<void> {
   } else {
     console.log('\nAll done! ✓');
   }
+}
+
+// Print a compact, human-readable account of what the Excel parser saw. Makes
+// a "0 entries" result diagnosable at a glance: which weeks exist, how many
+// task rows / hours each has, and which one the --week filter selected.
+function printParseReport(diag: ParseDiagnostics): void {
+  console.log(`      Sheet "${diag.sheetName}": ${diag.totalRows} rows, ${diag.weekBlocks} week block(s) detected.`);
+  if (diag.weekBlocks === 0) return;
+  console.log('      Weeks in file:');
+  diag.weeks.forEach((w) => {
+    const mark = diag.filterApplied ? (w.matchedFilter ? '► ' : '  ') : '  ';
+    console.log(
+      `      ${mark}${w.weekStart}–${w.weekEnd} (Mon ${w.monday}): ` +
+        `${w.taskRows} task row(s), ${w.taskRowsWithHours} with hours, ${w.entries} entr${w.entries === 1 ? 'y' : 'ies'}` +
+        `${diag.filterApplied && w.matchedFilter ? '  ← selected by filter' : ''}`,
+    );
+  });
 }
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {

@@ -1081,8 +1081,17 @@ $btnSubmit.Add_Click({
     Set-Status 'Running D365 automation...' ([System.Drawing.Color]::DodgerBlue)
     Start-PyProc $nodeArgs {
         param($exitCode)
-        if ($exitCode -eq 0) { Set-Status 'D365 submission done' ([System.Drawing.Color]::LimeGreen) }
-        else                 { Set-Status "D365 submission failed (exit $exitCode)" ([System.Drawing.Color]::OrangeRed) }
+        if ($exitCode -eq 0) {
+            # Exit 0 also covers the "nothing to submit" early-return (no browser
+            # launched). Distinguish it so an empty selection doesn't masquerade
+            # as a successful submission — the CLI prints this marker line.
+            if ($txtLog.Text -match 'No time entries to submit') {
+                Set-Status 'No entries for the selected week — nothing submitted (see log)' ([System.Drawing.Color]::Orange)
+            } else {
+                Set-Status 'D365 submission done' ([System.Drawing.Color]::LimeGreen)
+            }
+        }
+        else { Set-Status "D365 submission failed (exit $exitCode)" ([System.Drawing.Color]::OrangeRed) }
     } 'node'
 })
 

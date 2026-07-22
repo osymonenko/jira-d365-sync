@@ -27,13 +27,41 @@ function validateHours(hours: number, task: string, dateLabel: string): void {
   }
 }
 
-export function parseTimesheet(filePath: string, weekFilter?: Date): TimeEntry[] {
+// Structured, human-readable account of what parseTimesheet saw in the file.
+// Populated in-place when a `diag` object is passed. Lets the CLI explain *why*
+// a run produced 0 entries (wrong week date? week present but no hours? file
+// structure not recognised at all?) instead of a bare "Nothing to submit".
+export interface WeekDiag {
+  weekStart: string; // M/D/YYYY
+  weekEnd: string; // M/D/YYYY
+  monday: string; // M/D/YYYY — the date the --week filter is compared against
+  taskRows: number; // task-name rows seen in this block (col C non-empty)
+  taskRowsWithHours: number; // of those, how many had at least one hour cell > 0
+  entries: number; // flattened day-entries this block contributed
+  matchedFilter: boolean; // did this block pass the --week filter?
+}
+
+export interface ParseDiagnostics {
+  sheetName: string;
+  totalRows: number;
+  weekBlocks: number;
+  filterApplied?: string; // ISO date of the --week filter, if any
+  weeks: WeekDiag[];
+}
+
+export function parseTimesheet(
+  filePath: string,
+  weekFilter?: Date,
+  diag?: ParseDiagnostics,
+): TimeEntry[] {
   const wb = XLSX.readFile(filePath);
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null });
 
   const weeks: WeekBlock[] = [];
   let currentWeek: WeekBlock | null = null;
+  // Per-week diagnostic records, kept in lockstep with `weeks`.
+  const weekDiags: WeekDiag[] = [];
 
   // Row 0 may be a header (weekstart | weekend | Task | Mon | Tue | Wed | Thu | Fri) or already data.
   // Start at 0 — header rows naturally fail both block checks below (string col A, no currentWeek yet).
@@ -45,12 +73,21 @@ export function parseTimesheet(filePath: string, weekFilter?: Date): TimeEntry[]
 
     // New week block: col A contains a numeric Excel serial date
     if (typeof colA === 'number' && colA > 40000) {
-      currentWeek = {
-        weekStart: excelSerialToDate(colA),
-        weekEnd: excelSerialToDate(typeof colB === 'number' ? colB : colA + 6),
-        tasks: [],
-      };
+      const weekStart = excelSerialToDate(colA);
+      const weekEnd = excelSerialToDate(typeof colB === 'number' ? colB : colA + 6);
+      currentWeek = { weekStart, weekEnd, tasks: [] };
       weeks.push(currentWeek);
+      const monday = new Date(weekStart);
+      monday.setUTCDate(monday.getUTCDate() + 1);
+      weekDiags.push({
+        weekStart: toD365Date(weekStart),
+        weekEnd: toD365Date(weekEnd),
+        monday: toD365Date(monday),
+        taskRows: 0,
+        taskRowsWithHours: 0,
+        entries: 0,
+        matchedFilter: false,
+      });
     }
 
     // Task row: col C is a non-empty string
@@ -58,6 +95,8 @@ export function parseTimesheet(filePath: string, weekFilter?: Date): TimeEntry[]
       const taskName = colC.trim();
       // "check sum" is a user-maintained verification row (column totals), not a real task — skip it
       if (taskName.toLowerCase() === 'check sum') continue;
+      const curDiag = weekDiags[weekDiags.length - 1];
+      if (curDiag) curDiag.taskRows++;
       const hours: Partial<Record<DayKey, number>> = {};
 
       // Columns D–H (index 3–7) correspond to Mon–Fri
@@ -70,6 +109,7 @@ export function parseTimesheet(filePath: string, weekFilter?: Date): TimeEntry[]
 
       if (Object.keys(hours).length > 0) {
         currentWeek.tasks.push({ task: taskName, hours });
+        if (curDiag) curDiag.taskRowsWithHours++;
       }
     }
   }
@@ -77,7 +117,9 @@ export function parseTimesheet(filePath: string, weekFilter?: Date): TimeEntry[]
   // Flatten week blocks into individual TimeEntry records
   const entries: TimeEntry[] = [];
 
-  for (const week of weeks) {
+  for (let w = 0; w < weeks.length; w++) {
+    const week = weeks[w];
+    const wDiag = weekDiags[w];
     if (weekFilter) {
       // Filter to the week whose Monday matches weekFilter (within 1 day tolerance)
       const weekMonday = new Date(week.weekStart);
@@ -86,6 +128,7 @@ export function parseTimesheet(filePath: string, weekFilter?: Date): TimeEntry[]
       const mondayMs = weekMonday.getTime();
       if (Math.abs(filterMs - mondayMs) > 86400 * 1000) continue;
     }
+    if (wDiag) wDiag.matchedFilter = true;
 
     for (const taskRow of week.tasks) {
       DAY_KEYS.forEach((day, idx) => {
@@ -104,8 +147,17 @@ export function parseTimesheet(filePath: string, weekFilter?: Date): TimeEntry[]
           hours,
           weekStart: week.weekStart,
         });
+        if (wDiag) wDiag.entries++;
       });
     }
+  }
+
+  if (diag) {
+    diag.sheetName = wb.SheetNames[0];
+    diag.totalRows = rows.length;
+    diag.weekBlocks = weeks.length;
+    diag.filterApplied = weekFilter ? weekFilter.toISOString().slice(0, 10) : undefined;
+    diag.weeks = weekDiags;
   }
 
   return entries;

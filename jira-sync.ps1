@@ -16,9 +16,9 @@ function Read-EnvFile {
     return $h
 }
 
-function Save-JiraEnv($url, $email, $token, $project, $accountId, $excelFile, $sprintAnchor, $sprintLengthWeeks) {
-    $keys = @('JIRA_URL','JIRA_EMAIL','JIRA_API_TOKEN','JIRA_PROJECT','JIRA_ACCOUNT_ID','EXCEL_FILE','SPRINT_ANCHOR','SPRINT_LENGTH_WEEKS')
-    $vals = @{ JIRA_URL=$url; JIRA_EMAIL=$email; JIRA_API_TOKEN=$token; JIRA_PROJECT=$project; JIRA_ACCOUNT_ID=$accountId; EXCEL_FILE=$excelFile; SPRINT_ANCHOR=$sprintAnchor; SPRINT_LENGTH_WEEKS=$sprintLengthWeeks }
+function Save-JiraEnv($url, $email, $token, $project, $accountId, $excelFile, $sprintAnchor, $sprintLengthWeeks, $copyToBillable) {
+    $keys = @('JIRA_URL','JIRA_EMAIL','JIRA_API_TOKEN','JIRA_PROJECT','JIRA_ACCOUNT_ID','EXCEL_FILE','SPRINT_ANCHOR','SPRINT_LENGTH_WEEKS','COPY_TO_BILLABLE_DURATION')
+    $vals = @{ JIRA_URL=$url; JIRA_EMAIL=$email; JIRA_API_TOKEN=$token; JIRA_PROJECT=$project; JIRA_ACCOUNT_ID=$accountId; EXCEL_FILE=$excelFile; SPRINT_ANCHOR=$sprintAnchor; SPRINT_LENGTH_WEEKS=$sprintLengthWeeks; COPY_TO_BILLABLE_DURATION=$copyToBillable }
     $lines = @(); $written = @{}
     if (Test-Path $envFile) {
         Get-Content $envFile | ForEach-Object {
@@ -360,7 +360,7 @@ function Show-Settings {
     $tabConn  = New-Object System.Windows.Forms.TabPage; $tabConn.Text  = 'Connection'
     $tabStd   = New-Object System.Windows.Forms.TabPage; $tabStd.Text   = 'Standard tasks'
     $tabJql   = New-Object System.Windows.Forms.TabPage; $tabJql.Text   = 'Jira queries'
-    $tabLinks = New-Object System.Windows.Forms.TabPage; $tabLinks.Text = 'Links'
+    $tabLinks = New-Object System.Windows.Forms.TabPage; $tabLinks.Text = 'Other'
     $tabConn.BackColor  = [System.Drawing.Color]::White
     $tabStd.BackColor   = [System.Drawing.Color]::White
     $tabJql.BackColor   = [System.Drawing.Color]::White
@@ -769,6 +769,21 @@ function Show-Settings {
     })
     [void]$tabLinks.Controls.Add($lnkQae)
 
+    # ---- D365: Copy to Billable Duration toggle ----
+    $chkBillable = New-Object System.Windows.Forms.CheckBox
+    $chkBillable.Text = "Set 'Copy to Billable Duration' to Yes when submitting tasks to D365"
+    $chkBillable.Location = New-Object System.Drawing.Point(16,96)
+    $chkBillable.Size = New-Object System.Drawing.Size(490,24)
+    $chkBillable.Checked = ($d['COPY_TO_BILLABLE_DURATION'] -match '^(true|1|yes)$')
+    [void]$tabLinks.Controls.Add($chkBillable)
+    $lblBillHint = New-Object System.Windows.Forms.Label
+    $lblBillHint.Text = 'Unchecked = leave the D365 default (No) untouched.'
+    $lblBillHint.Location = New-Object System.Drawing.Point(34,120)
+    $lblBillHint.Size = New-Object System.Drawing.Size(470,16)
+    $lblBillHint.ForeColor = [System.Drawing.Color]::Gray
+    $lblBillHint.Font = New-Object System.Drawing.Font('Segoe UI',8)
+    [void]$tabLinks.Controls.Add($lblBillHint)
+
     $lblTest = New-Object System.Windows.Forms.Label
     $lblTest.Location = New-Object System.Drawing.Point(16,237)
     $lblTest.Size = New-Object System.Drawing.Size(460,20)
@@ -782,7 +797,7 @@ function Show-Settings {
     $btnT.Add_Click({
         $lblTest.Text = 'Testing...'; $lblTest.ForeColor = [System.Drawing.Color]::DodgerBlue
         $dlg.Refresh()
-        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text $tSprintLen.Text
+        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text $tSprintLen.Text ($chkBillable.Checked.ToString().ToLower())
         $psi2 = New-Object System.Diagnostics.ProcessStartInfo
         $psi2.FileName = 'python'; $psi2.Arguments = "scripts\jira-sync.py --command test --file `"$($tExcel.Text)`""
         $psi2.WorkingDirectory = $scriptDir; $psi2.UseShellExecute = $false
@@ -813,7 +828,7 @@ function Show-Settings {
     $btnSv.BackColor = [System.Drawing.Color]::FromArgb(255,0,122,200)
     $btnSv.ForeColor = [System.Drawing.Color]::White; $btnSv.FlatStyle = 'Flat'
     $btnSv.Add_Click({
-        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text $tSprintLen.Text
+        Save-JiraEnv $tUrl.Text $tMail.Text $tTok.Text $tProj.Text $tAcct.Text $tExcel.Text $tAnchor.Text $tSprintLen.Text ($chkBillable.Checked.ToString().ToLower())
         & $script:SaveStandardFromGrid
         & $script:SaveJqlConfig
         $txtFile.Text = $tExcel.Text

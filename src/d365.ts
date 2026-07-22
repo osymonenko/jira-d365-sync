@@ -21,6 +21,21 @@ const SELECTORS = {
   quickCreatePanel: 'div[aria-label="Quick Create: Time Entry"], .ms-Dialog-main, [data-id="quickCreateFlyout"]',
   dateField: 'input[aria-label="Date"], [data-id*="date"] input, input[placeholder*="date" i]',
   payableDurationContainer: '[data-id*="duration" i][data-id*="payable" i], [aria-label*="Payable Duration" i]',
+  // "Copy to Billable Duration" two-option field in the Quick Create panel.
+  // D365 renders a two-option/boolean field with the "Toggle" display as a
+  // Fluent UI switch (role="switch", aria-checked reflects on/off) — that's the
+  // pill control visible in the screenshot ("No"). Some tenants/builds render
+  // it as a checkbox instead, so we OR both role variants plus a data-id
+  // fallback (logical name usually contains "billable"). NOTE: this selector is
+  // written defensively from the field label — not yet confirmed against a live
+  // trace like the others. If it misses, widen the OR list or run playwright-healer.
+  copyToBillableToggle:
+    '[role="switch"][aria-label*="Copy to Billable" i], ' +
+    '[role="checkbox"][aria-label*="Copy to Billable" i], ' +
+    'input[type="checkbox"][aria-label*="Copy to Billable" i], ' +
+    '[data-id*="billable" i][role="switch"], ' +
+    '[data-id*="billable" i] [role="switch"], ' +
+    '[aria-label*="Copy to Billable Duration" i]',
   projectTaskField: '[data-id*="projecttask" i] input, [aria-label*="Project Task" i] input',
   // Task Lookup results dropdown — контейнер всегда имеет aria-label="Lookup
   // results" (верифицировано через trace.zip 2026-05-22), и для "No records",
@@ -140,6 +155,10 @@ export class D365Client {
   private readonly browserMode: string;
   private readonly cdpUrl: string;
   private readonly logger: Logger | null;
+  // When true, each new Time Entry has its "Copy to Billable Duration" toggle
+  // set to Yes during the pass. When false (default) the toggle is left at the
+  // D365 default and never touched. Driven by COPY_TO_BILLABLE_DURATION in .env.
+  private readonly copyToBillable: boolean;
   private tracingActive = false;
 
   constructor(
@@ -148,12 +167,14 @@ export class D365Client {
     browserMode = 'chrome-profile',
     cdpUrl = 'http://localhost:9222',
     logger: Logger | null = null,
+    copyToBillable = false,
   ) {
     this.d365Url = d365Url;
     this.userDataDir = path.resolve(userDataDir);
     this.browserMode = browserMode;
     this.cdpUrl = cdpUrl;
     this.logger = logger;
+    this.copyToBillable = copyToBillable;
   }
 
   private log(msg: string): void {
@@ -362,6 +383,11 @@ export class D365Client {
     // never appeared (legacy non-Fluent build) the isVisible probe returns
     // false within ~200ms and we move on.
     await this.dismissDatePickerPopup();
+
+    // 2.5. Copy to Billable Duration — only when explicitly enabled via settings.
+    if (this.copyToBillable) {
+      await this.setCopyToBillableToggle(true);
+    }
 
     // 3. Payable Duration: открыть dropdown, выбрать опцию по label'у ("30 minutes" / "1 hour" / ...)
     this.log(`    Filling duration: ${entry.hours}h`);
@@ -611,6 +637,35 @@ export class D365Client {
     await popup.waitFor({ state: 'hidden', timeout: 2000 }).catch(() => {
       this.log(`    ⚠ Calendar popup still visible after Escape — proceeding anyway`);
     });
+  }
+
+  // Set the "Copy to Billable Duration" toggle to `desired`. Best-effort: reads
+  // the current state via aria-checked and only clicks when it differs, so we
+  // never accidentally flip an already-correct toggle. If the control isn't
+  // found (label/markup differs on this tenant) we log a warning and continue —
+  // a missing toggle must not fail the whole entry.
+  private async setCopyToBillableToggle(desired: boolean): Promise<void> {
+    const page = this.getPage();
+    const toggle = page.locator(SELECTORS.copyToBillableToggle).first();
+    const visible = await toggle.isVisible({ timeout: 2000 }).catch(() => false);
+    if (!visible) {
+      this.log(`    ⚠ "Copy to Billable Duration" toggle not found — skipping (leaving D365 default)`);
+      return;
+    }
+    const checkedAttr = await toggle.getAttribute('aria-checked').catch(() => null);
+    // Fluent switch exposes aria-checked; a bare <input type=checkbox> may not,
+    // so fall back to the DOM `checked` property in that case.
+    const current =
+      checkedAttr !== null
+        ? checkedAttr === 'true'
+        : await toggle.isChecked().catch(() => false);
+    if (current === desired) {
+      this.log(`    Copy to Billable Duration already ${desired ? 'Yes' : 'No'} — no change`);
+      return;
+    }
+    this.log(`    Setting Copy to Billable Duration → ${desired ? 'Yes' : 'No'}`);
+    await toggle.click();
+    await page.waitForTimeout(200);
   }
 
   // Save the current Quick Create: Time Entry. When `keepPanelOpen` is true,

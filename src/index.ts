@@ -64,6 +64,10 @@ async function main(): Promise<void> {
   const browserMode = process.env['BROWSER_MODE'] ?? 'chrome-profile';
   const cdpUrl = process.env['CDP_URL'] ?? 'http://localhost:9222';
   const userDataDir = process.env['USER_DATA_DIR'] ?? './browser-profile';
+  // COPY_TO_BILLABLE_DURATION=true makes each new Time Entry set its "Copy to
+  // Billable Duration" toggle to Yes. Anything other than a truthy string
+  // ("true"/"1"/"yes") leaves the toggle at the D365 default (current behaviour).
+  const copyToBillable = /^(true|1|yes)$/i.test(process.env['COPY_TO_BILLABLE_DURATION'] ?? '');
 
   if (!d365Url) {
     console.error('Error: D365_URL is not set. Add it to .env or set the environment variable.');
@@ -110,7 +114,8 @@ async function main(): Promise<void> {
   logger.log(`Run ${runId} started — logs in ${logger.runDir}`);
 
   // Launch browser
-  const client = new D365Client(d365Url, userDataDir, browserMode, cdpUrl, logger);
+  const client = new D365Client(d365Url, userDataDir, browserMode, cdpUrl, logger, copyToBillable);
+  if (copyToBillable) console.log('Copy to Billable Duration: enabled (toggles set to Yes)');
   await client.launch();
 
   const results = { created: 0, existing: 0, failed: 0 };

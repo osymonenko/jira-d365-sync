@@ -22,3 +22,6 @@ __pycache__/
 # Ad-hoc debug logs
 fail log.txt
 fail log.txt.bak
+
+# Superpowers scratch state (планы и спеки живут в docs/superpowers/)
+.superpowers/

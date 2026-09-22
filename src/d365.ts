@@ -289,9 +289,21 @@ export class D365Client {
     ).first().waitFor({ state: 'visible', timeout: 5 * 60 * 1000 })
       .then(() => this.log('D365 nav bar detected'))
       .catch(() => {});
+    // Навбар — не единственный признак готовности: его разметка отличается между
+    // сборками D365 и на хабе выбора приложения (pagetype=apps) его нет вовсе, а
+    // SSO прогоняет через цепочку редиректов. Наличие window.Xrm означает, что
+    // клиент поднялся, и этого достаточно для Web API — ждём что придёт раньше.
+    const xrmWait = this.page!.waitForFunction(
+      '!!(window.Xrm && window.Xrm.Utility && window.Xrm.Utility.getGlobalContext)',
+      undefined,
+      { timeout: 5 * 60 * 1000, polling: 1000 },
+    )
+      .then(() => this.log('D365 client (Xrm) ready'))
+      .catch(() => {});
     try {
       await Promise.race([
         navBarWait,
+        xrmWait,
         stdinSignal.promise.then(() => this.log('User confirmed login (manual signal)')),
       ]);
     } finally {

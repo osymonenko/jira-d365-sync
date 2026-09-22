@@ -11,6 +11,7 @@ import base64
 import json
 import os
 import re
+import socket
 import sys
 import urllib.parse
 import urllib.request
@@ -18,7 +19,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from month_filter import clamp_week_to_month, month_bounds
-from standard_tasks import rows_for_week, DAY_COL, load_schedule, parse_sprint_length_weeks
+from standard_tasks import rows_for_week, DAY_COL, DAY_OFFSET, load_schedule, parse_sprint_length_weeks
+from balance_hours import plan_week, hours_to_q, q_to_hours, normalize_task_name
 
 import pathlib as _pathlib
 _CONFIG_DIR = _pathlib.Path(__file__).resolve().parent.parent / "config"
@@ -116,6 +118,83 @@ def load_env(root: Path) -> dict:
         if key in os.environ:
             env[key] = os.environ[key]
     return env
+
+
+# ---------------------------------------------------------------------------
+# Preflight — fail fast BEFORE the slow work
+# ---------------------------------------------------------------------------
+# Both `sync` and `fill-standard` spend minutes on Jira queries / row building
+# and only touch the workbook at the very end. If the file is open in Excel (a
+# write-locked handle) or the network is down, the failure used to surface after
+# all that work — and, worse, `wb.save()` swallowed PermissionError and returned
+# exit code 0, so the GUI showed a green "Sync complete" while nothing was
+# written. These checks run first and exit(1) loudly.
+
+def check_excel_writable(file_path: str) -> None:
+    """Exit(1) unless `file_path` exists, parses and is writable right now."""
+    path = Path(file_path)
+    print(f"[INFO] Preflight: {path}", flush=True)
+
+    if not path.exists():
+        print(f"[ERROR] Excel file not found: {path}", flush=True)
+        sys.exit(1)
+
+    # Excel keeps an owner file "~$<name>.xlsx" next to the workbook while it is
+    # open — it catches even a read-only/shared open, where the write probe below
+    # would succeed.
+    lock_file = path.with_name("~$" + path.name)
+    if lock_file.exists():
+        print(f"[ERROR] File is open in Excel — close it and retry: {path}", flush=True)
+        print(f"[FIX]   Lock file present: {lock_file.name}", flush=True)
+        sys.exit(1)
+
+    # Write probe: opening for update takes a write handle without changing a
+    # byte. Excel's exclusive lock makes this raise PermissionError.
+    try:
+        with open(path, "r+b"):
+            pass
+    except PermissionError:
+        print(f"[ERROR] File is locked (open in Excel?) — close it and retry: {path}", flush=True)
+        sys.exit(1)
+    except OSError as e:
+        print(f"[ERROR] Cannot open {path}: {e}", flush=True)
+        sys.exit(1)
+
+    try:
+        wb = openpyxl.load_workbook(path, data_only=True)
+        weeks = find_weeks(wb.worksheets[0])
+        wb.close()
+    except Exception as e:
+        print(f"[ERROR] Cannot read the workbook: {e}", flush=True)
+        sys.exit(1)
+
+    if not weeks:
+        print("[ERROR] No week blocks found in Excel (column A must hold the week-start date)", flush=True)
+        sys.exit(1)
+    print(f"[OK]   File writable, {len(weeks)} week block(s) found", flush=True)
+
+
+def check_network(base_url: str) -> None:
+    """Exit(1) if the Jira host is unreachable. A 4s TCP probe, so a dead VPN or
+    a dropped Wi-Fi is reported in seconds instead of after a 30s urllib hang."""
+    if not base_url:
+        return
+    parsed = urllib.parse.urlparse(base_url)
+    host = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    if not host:
+        return
+    print(f"[INFO] Preflight: {host}:{port}", flush=True)
+    try:
+        with socket.create_connection((host, port), timeout=4):
+            pass
+    except socket.gaierror:
+        print(f"[ERROR] Cannot resolve {host} — check your internet connection / VPN", flush=True)
+        sys.exit(1)
+    except OSError as e:
+        print(f"[ERROR] Cannot reach {host}:{port} ({e}) — check your internet connection / VPN", flush=True)
+        sys.exit(1)
+    print(f"[OK]   {host} reachable", flush=True)
 
 
 def jira_get(url: str, email: str, token: str) -> dict:
@@ -452,6 +531,76 @@ def _insert_rows_preserving_hyperlinks(ws, idx: int, amount: int) -> None:
         ws.cell(row=r + amount, column=c).hyperlink = target
 
 
+def _delete_rows_preserving_hyperlinks(ws, idx: int, amount: int = 1) -> None:
+    """Delete `amount` rows at `idx`, keeping hyperlinks attached to their cells.
+
+    Mirror of _insert_rows_preserving_hyperlinks: openpyxl's delete_rows() moves
+    cell values and styles up but leaves hyperlinks anchored to the coordinates
+    they had before the shift, so every Jira link below the deletion point ends
+    up pointing at the wrong row.
+    """
+    moved = []  # (row, column, target) for rows that survive and shift up
+    for row in ws.iter_rows(min_row=idx):
+        for cell in row:
+            if cell.hyperlink is not None:
+                moved.append((cell.row, cell.column, cell.hyperlink.target))
+    for r, c, _ in moved:
+        ws.cell(row=r, column=c).hyperlink = None
+    ws.delete_rows(idx, amount)
+    for r, c, target in moved:
+        if r >= idx + amount:
+            ws.cell(row=r - amount, column=c).hyperlink = target
+
+
+def _merge_duplicate_task_rows(ws, fixed_names: set) -> tuple[dict, int]:
+    """Слить строки с одинаковым названием внутри недели в одну.
+
+    Jira отдаёт несколько тикетов, которым правила именования дают одно и то же
+    имя ("Automation test maintenance" ×4) — в табеле это одна работа, а не
+    четыре строки. Часы дублей переливаем в первую строку, дубли удаляем.
+
+    Возвращает ({(week_start, имя_в_нижнем_регистре): сколько строк слилось},
+    сколько строк удалено). Кратность нужна раскладке: задача, вобравшая четыре
+    тикета, и часов заслуживает вчетверо, и вправе занять несколько дней.
+    """
+    counts: dict = {}
+    to_delete: list[int] = []
+
+    for week in find_weeks(ws):
+        check_row = week["check_sum_row"]
+        first_by_name: dict = {}
+        for r in range(week["start_row"], week["end_row"]):
+            if r == check_row:
+                continue
+            raw = ws.cell(r, 3).value
+            if raw in (None, ""):
+                continue
+            name = str(raw).strip()
+            if name.lower() == "check sum" or name.lower() in fixed_names:
+                continue
+            # Ключ — нормализованное имя: "Investigation issue" и "Investigation
+            # issue 2" это одна работа, разъехавшаяся на заглушку и строку из Jira.
+            low = normalize_task_name(name)
+            if low not in first_by_name:
+                first_by_name[low] = r
+                continue
+            first = first_by_name[low]
+            for col in _DAY_COLS:
+                val = ws.cell(r, col).value
+                if isinstance(val, (int, float)):
+                    prev = ws.cell(first, col).value
+                    ws.cell(first, col).value = (prev if isinstance(prev, (int, float)) else 0) + val
+            to_delete.append(r)
+            key = (week["week_start"], low)
+            counts[key] = counts.get(key, 1) + 1
+
+    # Снизу вверх: удаление строки сдвигает всё, что ниже, и индексы поехали бы.
+    for r in sorted(to_delete, reverse=True):
+        _delete_rows_preserving_hyperlinks(ws, r, 1)
+
+    return counts, len(to_delete)
+
+
 def _apply_insertions(ws, insertions: dict, write_row) -> int:
     """Insert rows bottom-up into existing week blocks.
 
@@ -498,8 +647,10 @@ def update_excel(file_path: str, insertions: dict) -> int:
     try:
         wb.save(file_path)
     except PermissionError:
+        # Exiting non-zero matters: the GUI colours the status bar from the exit
+        # code, so a swallowed save error used to read as "Sync complete".
         print(f"[ERROR] Cannot save — close the file in Excel first: {file_path}", flush=True)
-        return 0
+        sys.exit(1)
     return total
 
 
@@ -664,8 +815,10 @@ def insert_standard_rows(file_path: str, insertions: dict) -> int:
     try:
         wb.save(file_path)
     except PermissionError:
+        # Exiting non-zero matters: the GUI colours the status bar from the exit
+        # code, so a swallowed save error used to read as "Sync complete".
         print(f"[ERROR] Cannot save — close the file in Excel first: {file_path}", flush=True)
-        return 0
+        sys.exit(1)
     return total
 
 
@@ -682,6 +835,7 @@ def cmd_test(args):
     if not all([base_url, email, token]):
         print("[ERROR] JIRA_URL, JIRA_EMAIL or JIRA_API_TOKEN missing in .env", flush=True)
         sys.exit(1)
+    check_network(base_url)
     print(f"[INFO] Connecting to {base_url} as {email} ...", flush=True)
     try:
         account_id = get_account_id(base_url, email, token, env.get("JIRA_ACCOUNT_ID", ""))
@@ -724,6 +878,9 @@ def cmd_sync(args):
     if not all([base_url, email, token]):
         print("[ERROR] JIRA_URL, JIRA_EMAIL or JIRA_API_TOKEN missing in .env", flush=True)
         sys.exit(1)
+
+    check_excel_writable(args.file)
+    check_network(base_url)
 
     print(f"[INFO] Connecting to {base_url} as {email} ...", flush=True)
     try:
@@ -799,6 +956,8 @@ def cmd_fill_standard(args):
     root = Path(args.file).resolve().parent.parent
     env = load_env(root)
 
+    check_excel_writable(args.file)
+
     if args.month:
         try:
             month_bounds(args.month)
@@ -871,23 +1030,208 @@ def cmd_fill_standard(args):
         print("\n[DONE] Nothing to insert.", flush=True)
 
 
+def _week_active_cols(week_start, week_end, month):
+    """Колонки дней (Пн..Пт), которые вообще можно заполнять в этом блоке.
+    С --month дни соседнего месяца отбрасываются: неделя 30.08–05.09 при
+    --month 2026-09 начинается со вторника 01.09, а не с понедельника 31.08."""
+    if month:
+        clamped = clamp_week_to_month(week_start, week_end, month)
+        if clamped is None:
+            return []
+        win_start, win_end = clamped
+    else:
+        win_start, win_end = week_start, week_end or (week_start + timedelta(days=6))
+
+    cols = []
+    for day, col in DAY_COL.items():
+        d = week_start + timedelta(days=DAY_OFFSET[day])
+        if win_start <= d <= win_end:
+            cols.append(col)
+    return sorted(cols)
+
+
+def cmd_balance(args):
+    """Добить недостающие часы по строкам задач до target ч/день.
+
+    Регулярные задачи (из schedule) и строки, где часы уже проставлены, не
+    трогаем — их часы только учитываются. Остаток раскладываем по пустым
+    строкам (Jira + QA-заглушки): одна задача в один день = одно число.
+    """
+    check_excel_writable(args.file)
+
+    if args.month:
+        try:
+            month_bounds(args.month)
+        except ValueError as e:
+            print(f"[ERROR] {e}", flush=True)
+            sys.exit(1)
+
+    target_q = hours_to_q(args.hours_per_day)
+    if target_q <= 0:
+        print(f"[ERROR] --hours-per-day must be positive, got {args.hours_per_day}", flush=True)
+        sys.exit(1)
+
+    wb = openpyxl.load_workbook(args.file)
+    ws = wb.worksheets[0]
+
+    schedule, _placeholders = load_schedule()
+    fixed_names = {str(t.get("name", "")).strip().lower() for t in schedule}
+
+    # Слияние дублей идёт ДО find_weeks: удаление строк сдвигает нумерацию, и
+    # собранные заранее индексы недель стали бы враньём.
+    multiplicity, merged_away = _merge_duplicate_task_rows(ws, fixed_names)
+    if merged_away:
+        print(f"[INFO] Merged {merged_away} duplicate task row(s):", flush=True)
+        for (week_start, low), count in sorted(multiplicity.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+            print(f"    • {fmt(week_start)}: {low} ×{count}", flush=True)
+
+    weeks = find_weeks(ws)
+
+    if args.weeks:
+        selected = set(args.weeks)
+        weeks = [
+            w for w in weeks
+            if any(abs(((w["week_start"] + timedelta(days=1)) - datetime.strptime(m, "%Y-%m-%d").date()).days) <= 1
+                   for m in selected)
+        ]
+        if not weeks:
+            print("[ERROR] None of the specified weeks found in Excel", flush=True)
+            sys.exit(1)
+
+    changes = 0
+    for week in weeks:
+        ws_key = fmt(week["week_start"])
+        week_end = week["week_end"] or (week["week_start"] + timedelta(days=6))
+        active_cols = _week_active_cols(week["week_start"], week_end, args.month)
+        if not active_cols:
+            print(f"[SKIP] {ws_key}: week is outside --month {args.month}", flush=True)
+            continue
+
+        check_row = week["check_sum_row"]
+        task_rows = [
+            r for r in range(week["start_row"], week["end_row"])
+            if r != check_row
+            and ws.cell(r, 3).value not in (None, "")
+            and str(ws.cell(r, 3).value).strip().lower() != "check sum"
+        ]
+        if not task_rows:
+            print(f"[SKIP] {ws_key}: no task rows", flush=True)
+            continue
+
+        used_by_col = {col: 0.0 for col in active_cols}
+        fillable = []
+        for r in task_rows:
+            name = str(ws.cell(r, 3).value).strip()
+            is_fixed = name.lower() in fixed_names
+            # --reset: стираем прошлую раскладку, чтобы посчитать её заново.
+            # Регулярные задачи не трогаем никогда — у них предписанные часы.
+            if args.reset and not is_fixed:
+                for col in active_cols:
+                    ws.cell(row=r, column=col).value = None
+            row_total = 0.0
+            for col in _DAY_COLS:
+                v = ws.cell(r, col).value
+                if isinstance(v, (int, float)):
+                    if col in used_by_col:
+                        used_by_col[col] += float(v)
+                    row_total += float(v)
+            # Кандидат на добивку — только строка без единого часа и не из
+            # регулярного расписания. Уже проставленные часы (в т.ч. поправленные
+            # вручную) остаются как есть, поэтому повторный запуск не задваивает.
+            if row_total == 0 and not is_fixed:
+                fillable.append((r, name))
+
+        # Слитая задача идёт в раскладку как несколько «виртуальных» задач: так
+        # она получает долю часов по числу вобранных тикетов и вправе занять
+        # несколько дней — по одному числу в каждом. Результат потом
+        # схлопывается обратно в одну строку.
+        expanded_names, owners = [], []
+        for idx, (_row, name) in enumerate(fillable):
+            for _ in range(multiplicity.get((week["week_start"], normalize_task_name(name)), 1)):
+                expanded_names.append(name)
+                owners.append(idx)
+
+        # Неделя целиком впереди — это план, а не отчёт: размазываем всё по дням.
+        is_future_week = (week["week_start"] + timedelta(days=1)) > date.today()
+        raw_plan, free_q = plan_week(used_by_col, active_cols, expanded_names,
+                                     day_target_q=target_q,
+                                     spread_all_tasks=is_future_week)
+        plan: list = [{} for _ in fillable]
+        for owner, alloc in zip(owners, raw_plan):
+            for col, hours in alloc.items():
+                plan[owner][col] = round(plan[owner].get(col, 0) + hours, 2)
+        free_h = q_to_hours(free_q)
+
+        if free_q <= 0:
+            print(f"[SKIP] {ws_key}: days already full ({args.hours_per_day}h each)", flush=True)
+            continue
+        if not fillable:
+            print(f"[WARN] {ws_key}: {free_h}h short but no empty task rows to fill — "
+                  f"add rows via Jira/Standard first", flush=True)
+            continue
+
+        assigned_q = sum(hours_to_q(h) for row in plan for h in row.values())
+        empty = sum(1 for row in plan if not row)
+        print(f"[INFO] {ws_key}: {free_h}h free across {len(active_cols)} day(s), "
+              f"{len(fillable)} task row(s) to fill", flush=True)
+        if empty:
+            print(f"[WARN] {ws_key}: not enough hours for every row — {empty} row(s) stay empty", flush=True)
+
+        for (row_idx, name), alloc in zip(fillable, plan):
+            if not alloc:
+                continue
+            detail = ", ".join(f"{_COL_LETTER[c]} {h}h" for c, h in sorted(alloc.items()))
+            print(f"    • {name[:58]}  ->  {detail}", flush=True)
+            if not args.dry_run:
+                for col, hours in alloc.items():
+                    ws.cell(row=row_idx, column=col).value = hours
+            changes += 1
+
+        if assigned_q < free_q:
+            print(f"[WARN] {ws_key}: {q_to_hours(free_q - assigned_q)}h still unassigned", flush=True)
+
+    if args.dry_run:
+        print("\n[DRY RUN] Excel not modified.", flush=True)
+        return
+
+    if changes or args.reset:
+        _reconcile_check_sums(ws)
+        try:
+            wb.save(args.file)
+        except PermissionError:
+            print(f"[ERROR] Cannot save — close the file in Excel first: {args.file}", flush=True)
+            sys.exit(1)
+        print(f"\n[DONE] {changes} row(s) filled.", flush=True)
+    else:
+        print("\n[DONE] Nothing to fill.", flush=True)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--command", choices=["test", "read-weeks", "sync", "fill-standard"], default="sync")
+    parser.add_argument("--command", choices=["test", "read-weeks", "sync", "fill-standard", "balance"], default="sync")
     parser.add_argument("--file")
     parser.add_argument("--weeks", nargs="*", help="Monday dates YYYY-MM-DD (space separated)")
     parser.add_argument("--month", help="Clamp week windows to this month (YYYY-MM)")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--hours-per-day", type=float, default=8.0,
+                        help="Daily target the balance command tops up to (default 8)")
+    parser.add_argument("--reset", action="store_true",
+                        help="balance: wipe hours on non-standard task rows first, then redistribute")
     args = parser.parse_args()
 
     if args.command == "test":
         cmd_test(args)
     elif args.command == "read-weeks":
         cmd_read_weeks(args)
+    elif args.command == "balance":
+        if not args.file:
+            print("[ERROR] --file required for balance", flush=True)
+            sys.exit(1)
+        cmd_balance(args)
     elif args.command == "fill-standard":
         if not args.file:
             print("[ERROR] --file required for fill-standard", flush=True)

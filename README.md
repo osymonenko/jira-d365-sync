@@ -87,9 +87,12 @@ Account ID можно оставить пустым — тогда исполь�
    в выбранные недели, снизу дописывает строку `check sum` с формулами `=SUM()` по дням.
 4. **Jira ↓** — прогоняет 6 JQL-запросов на каждую выбранную неделю и вставляет полученные строки
    перед `check sum`.
-5. **Submit tasks →** — открывает Edge, идёт в D365 и создаёт Time Entries по первому дню каждой
-   задачи. Если задачи в D365 нет — создаёт её через Quick Create: Imported Project Task.
-6. **Fill days ↑** — пока неактивна (см. [Ограничения](#ограничения)).
+5. **Balance 8h ⚖** — добивает пустые строки задач часами так, чтобы в `check sum` под каждым днём
+   вышло 8. Спрашивает, пересчитать раскладку с нуля или только дозаполнить пустые строки.
+   Регулярные задачи и уже проставленные вами часы не трогает.
+6. **Submit to D365 →** — открывает Edge, идёт в D365 и создаёт Time Entries сразу по всем дням
+   каждой задачи. Если задачи в D365 нет — создаёт её. На каждую ячейку табеля появляются две
+   записи: Payable и Billable. Всё создаётся в статусе **Draft** — проверьте и нажмите Submit в D365.
 
 Дополнительные кнопки: **Test** — проверка связи с Jira, **Open File** — открыть табель в Excel,
 **⛔** — убить текущий процесс, **Copy log** — скопировать лог целиком.
@@ -101,7 +104,7 @@ Account ID можно оставить пустым — тогда исполь�
   `[ERROR] Cannot save — close the file in Excel first`).
 - При первом заходе в D365 нужно вручную залогиниться в открывшемся окне Edge; автоматизация
   продолжится сама, как только увидит навбар D365 (ожидание до 5 минут).
-- **Submit tasks** обрабатывает одну неделю за прогон. Если отмечено несколько — берётся первая,
+- **Submit to D365** обрабатывает одну неделю за прогон. Если отмечено несколько — берётся первая,
   GUI об этом предупреждает; для остальных нужно перезапустить.
 - Статус `No entries for the selected week` означает, что в выбранной неделе нет часов, — это не успех и не ошибка.
 
@@ -133,12 +136,17 @@ python scripts/jira-sync.py --command read-weeks --file data\timesheet.xlsx     
 python scripts/jira-sync.py --command sync --file data\timesheet.xlsx --weeks 2026-06-15 2026-06-22
 python scripts/jira-sync.py --command sync --file data\timesheet.xlsx --month 2026-06 --dry-run
 python scripts/jira-sync.py --command fill-standard --file data\timesheet.xlsx --month 2026-06
+python scripts/jira-sync.py --command balance --file data\timesheet.xlsx --month 2026-06          # добить до 8 ч/день
+python scripts/jira-sync.py --command balance --file data\timesheet.xlsx --month 2026-06 --reset  # пересчитать с нуля
 
 # D365 (Node)
-npm start -- --file data\timesheet.xlsx --list-tasks        # только разбор Excel
-npm start -- --file data\timesheet.xlsx --preflight-only    # проверки без браузера
-npm start -- --file data\timesheet.xlsx --week 2026-06-15   # прогон одной недели
+.\submit.bat --file data\timesheet.xlsx --list-tasks        # только разбор Excel
+.\submit.bat --file data\timesheet.xlsx --preflight-only    # проверки без браузера
+.\submit.bat --file data\timesheet.xlsx --week 2026-06-15   # прогон одной недели
+.\submit.bat --file data\timesheet.xlsx                     # весь файл
 ```
+
+Запускайте именно `submit.bat`, а не `npm start -- --file ...`: в PowerShell npm теряет имена флагов по дороге, и скрипт ругается `required option '-f, --file <path>' not specified`, хотя команда набрана правильно.
 
 `--dry-run` (только Python) показывает, что было бы вставлено, ничего не записывая в файл.
 
@@ -150,7 +158,7 @@ npm start -- --file data\timesheet.xlsx --week 2026-06-15   # прогон од�
   копирует его целиком.
 - Пошаговая отладка UI-сценариев: `npx playwright test --ui` (спеки в [tests/](tests/) используют
   тот же `D365Client`, что и продакшн-CLI).
-- **Нельзя** одновременно запускать `npm start` и `npx playwright test` — они делят один профиль браузера.
+- **Нельзя** одновременно запускать заливку (`.\submit.bat`) и `npx playwright test` — они делят один профиль браузера.
 
 ## Тесты
 
@@ -163,10 +171,13 @@ npx playwright test                       # сценарии D365 в реаль�
 
 ## Ограничения
 
-- **Stage 2 не реализован.** В D365 создаётся запись только по первому дню каждой задачи;
-  остальные дни многодневной задачи нужно проставить руками в Weekly Time Entries grid.
-  Кнопка **Fill days ↑** поэтому отключена.
-- **Submit tasks** — одна неделя за прогон.
+- Записи создаются в статусе **Draft** — проверить и нажать **Submit** в D365 нужно самому.
+- Повторная заливка не исправляет уже созданные записи: они пропускаются как существующие.
+  Если часы в табеле поменялись, удалите записи за эти дни в D365 и залейте неделю заново.
+- Заливка идёт через Web API D365. Если тенант его закроет, остаётся запасной путь
+  `--mode ui` (Quick Create), но он заполняет только первый день каждой задачи.
+- В PowerShell запускайте `.\submit.bat`, а не `npm start -- --file ...`: npm теряет имена
+  флагов, и скрипт ругается `required option '-f, --file <path>' not specified`.
 - Для SSO в AMC Bridge профиль браузера должен содержать рабочую сессию Microsoft; при пустом
   профиле возможен цикл редиректов на страницу логина — залогиньтесь в открытом окне вручную.
 - `data/`, `config/`, `.env`, профили браузера и `logs/` в репозиторий не попадают: там реальные

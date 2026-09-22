@@ -120,10 +120,10 @@ $pnlBtns.BackColor = [System.Drawing.Color]::FromArgb(255,60,60,72)
 
 $btnFillStd = New-Btn $pnlBtns 'Standard ↓'         8   8 150 36 120 80  160
 $btnSync    = New-Btn $pnlBtns 'Jira ↓'             166 8 150 36 0   122 200
-$btnSubmit  = New-Btn $pnlBtns 'Submit tasks →'      324 8 185 36 180 80  0
-$btnFill    = New-Btn $pnlBtns 'Fill days ↑↑↑↑↑'    517 8 220 36 80  80  80
-$btnFill.Enabled = $false
-$btnFill.ForeColor = [System.Drawing.Color]::FromArgb(255,140,140,140)
+$btnBalance = New-Btn $pnlBtns 'Balance 8h ⚖'       324 8 150 36 150 110 40
+# Одна кнопка на всю заливку: режим api создаёт записи за все дни сразу, так что
+# отдельного шага "Fill days" (добивка остальных дней после первого) больше нет.
+$btnSubmit  = New-Btn $pnlBtns 'Submit to D365 →'    482 8 220 36 180 80  0
 
 $btnStop = New-Btn $pnlBtns '⛔' 1024 8 22 36 140 30 30
 $btnStop.Enabled = $false
@@ -1070,6 +1070,39 @@ $btnFillStd.Add_Click({
         param($code)
         if ($code -eq 0) { Set-Status 'Standard tasks filled' ([System.Drawing.Color]::LimeGreen) }
         else             { Set-Status ('Fill failed (exit ' + $code + ')') ([System.Drawing.Color]::OrangeRed) }
+    }
+})
+
+$btnBalance.Add_Click({
+    if (-not (Test-Path $txtFile.Text)) {
+        [void][System.Windows.Forms.MessageBox]::Show('Excel file not found: ' + $txtFile.Text, 'Balance')
+        return
+    }
+    $monthCode = $null
+    if ($cmbMonth.SelectedIndex -gt 0) { $monthCode = $script:monthCodes[[string]$cmbMonth.SelectedItem] }
+    $selected = @($script:weekCheckboxes | Where-Object { $_.Checked } | ForEach-Object { $_.Tag })
+    if (-not $monthCode -and $selected.Count -eq 0) {
+        [void][System.Windows.Forms.MessageBox]::Show('Select a month or check at least one week.', 'Balance')
+        return
+    }
+    # Без --reset команда трогает только пустые строки, т.е. повторное нажатие
+    # ничего не меняет. Спрашиваем явно, а не угадываем: --reset стирает и ручные
+    # правки в строках задач (регулярные задачи он не трогает в любом случае).
+    $resetAnswer = [System.Windows.Forms.MessageBox]::Show(
+        "Redistribute hours from scratch?`n`nYes - wipe the current distribution on task rows and recalculate.`nNo  - only fill rows that are still empty.",
+        'Balance hours', 'YesNoCancel', 'Question')
+    if ($resetAnswer -eq 'Cancel') { return }
+
+    $txtLog.Clear()
+    Set-Status 'Balancing hours to 8h/day...' ([System.Drawing.Color]::DodgerBlue)
+    $extraArgs = ''
+    if ($monthCode)            { $extraArgs += ' --month ' + $monthCode }
+    if ($selected.Count -gt 0) { $extraArgs += ' --weeks ' + ($selected -join ' ') }
+    if ($resetAnswer -eq 'Yes') { $extraArgs += ' --reset' }
+    Start-PyProc ('scripts\jira-sync.py --command balance --file "' + $txtFile.Text + '"' + $extraArgs) {
+        param($code)
+        if ($code -eq 0) { Set-Status 'Hours balanced' ([System.Drawing.Color]::LimeGreen) }
+        else             { Set-Status ('Balance failed (exit ' + $code + ')') ([System.Drawing.Color]::OrangeRed) }
     }
 })
 

@@ -4,6 +4,7 @@ dotenv.config();
 import { Command } from 'commander';
 import { firstEntriesPerTask, parseTimesheet, ParseDiagnostics } from './excel';
 import { D365Client } from './d365';
+import { D365Api, hoursToMinutes, toIsoDate, HOURS_TYPE_PAYABLE, HOURS_TYPE_BILLABLE } from './d365-api';
 import { runPreflight } from './preflight';
 import { TimeEntry } from './types';
 import { createLogger, createRunId, Logger } from './logger';
@@ -17,6 +18,7 @@ program
   .option('-w, --week <date>', 'Only process the week containing this Monday (YYYY-MM-DD). Omit to process all weeks.')
   .option('--stage1-only', '[kept for GUI compatibility] alias for default behaviour — Stage 2 is not implemented yet')
   .option('--stage2-only', '[deprecated] Stage 2 not implemented yet — see TODO in src/d365.ts')
+  .option('-m, --mode <mode>', 'api = Web API (fast, fills every day in one pass) | ui = Quick Create panel', 'api')
   .option('--preflight-only', 'Run preflight checks only (no browser automation)')
   .option('--list-tasks', 'Parse Excel and list all tasks without running automation')
   .parse(process.argv);
@@ -24,6 +26,7 @@ program
 const opts = program.opts<{
   file: string;
   week?: string;
+  mode?: string;
   stage1Only?: boolean;
   stage2Only?: boolean;
   preflightOnly?: boolean;
@@ -73,6 +76,12 @@ async function main(): Promise<void> {
 
   if (!d365Url) {
     console.error('Error: D365_URL is not set. Add it to .env or set the environment variable.');
+    process.exit(1);
+  }
+
+  const mode = (opts.mode ?? 'api').toLowerCase();
+  if (mode !== 'api' && mode !== 'ui') {
+    console.error(`Error: --mode "${opts.mode}" is not supported. Use "api" or "ui".`);
     process.exit(1);
   }
 
@@ -139,6 +148,21 @@ async function main(): Promise<void> {
   const client = new D365Client(d365Url, userDataDir, browserMode, cdpUrl, logger, copyToBillable);
   await client.launch();
 
+  // Режим api не открывает Quick Create вообще: записи создаются через Web API
+  // из уже авторизованной вкладки. Дата — это поле записи, а не то, какую
+  // неделю показывает грид, поэтому и первый день задачи, и все остальные
+  // закрываются одним проходом, без переключения недель.
+  if (mode === 'api') {
+    let ok = false;
+    try {
+      ok = await runApiMode(client, entries, runId, logger.runDir);
+    } finally {
+      await client.close();
+      await logger.close();
+    }
+    process.exit(ok ? 0 : 1);
+  }
+
   const results = { created: 0, existing: 0, failed: 0 };
   const failures: { entry: string; error: string }[] = [];
 
@@ -184,6 +208,105 @@ async function main(): Promise<void> {
   } else {
     console.log('\nAll done! ✓');
   }
+}
+
+/**
+ * Заливка табеля через Web API. Один проход по ВСЕМ записям Excel — деления на
+ * Stage 1 / Stage 2 здесь нет, потому что у записи есть поле даты и не нужно
+ * ни открывать Quick Create, ни листать недели в гриде.
+ *
+ * На каждую ячейку Excel создаются ДВЕ записи D365: Payable и Billable. В этом
+ * тенанте это отдельные строки (amc_hourstype), а не два поля одной записи —
+ * см. src/d365-api.ts.
+ */
+async function runApiMode(
+  client: D365Client,
+  entries: TimeEntry[],
+  runId: string,
+  runDir: string,
+): Promise<boolean> {
+  const api = new D365Api(client.getCurrentPage(), (m) => console.log(m));
+
+  console.log(`\n[4/4] Web API: creating ${entries.length * 2} record(s) for ${entries.length} cell(s) ──`);
+  const ctx = await api.resolveContext();
+  console.log(`      Project: ${ctx.projectName}`);
+  console.log(`      Team:    ${ctx.teamName}`);
+
+  const isoDates = entries.map((e) => toIsoDate(e.date)).sort();
+  const from = isoDates[0];
+  const to = isoDates[isoDates.length - 1];
+  console.log(`      Period:  ${from} … ${to}`);
+
+  const taskIndex = await api.loadTaskIndex(ctx.projectId);
+  console.log(`      Project tasks known to D365: ${taskIndex.size}`);
+
+  // Ключи уже существующих записей: повторный запуск не задваивает табель.
+  const existing = await api.existingEntryKeys(ctx.userId, from, to);
+  console.log(`      Entries already in this period: ${existing.size}\n`);
+
+  const stats = { created: 0, skipped: 0, tasksCreated: 0, failed: 0 };
+  const failures: string[] = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const label = `${entry.date} | ${entry.task} | ${entry.hours}h`;
+    const date = toIsoDate(entry.date);
+    const nameKey = entry.task.trim().toLowerCase();
+
+    let taskId = taskIndex.get(nameKey);
+    if (!taskId) {
+      try {
+        taskId = await api.createTask(entry.task.trim(), ctx.projectId);
+        taskIndex.set(nameKey, taskId);
+        stats.tasksCreated++;
+        console.log(`  + project task created: ${entry.task}`);
+      } catch (err) {
+        stats.failed += 2;
+        failures.push(`${label} — не смог создать задачу: ${(err as Error).message}`);
+        console.error(`  ✗ [${i + 1}/${entries.length}] ${label} — task create failed`);
+        continue;
+      }
+    }
+
+    const done: string[] = [];
+    for (const hoursType of [HOURS_TYPE_PAYABLE, HOURS_TYPE_BILLABLE]) {
+      const kind = hoursType === HOURS_TYPE_PAYABLE ? 'payable' : 'billable';
+      const key = `${date}|${taskId}|${hoursType}`;
+      if (existing.has(key)) {
+        stats.skipped++;
+        done.push(`${kind}: already there`);
+        continue;
+      }
+      try {
+        await api.createEntry({ date, minutes: hoursToMinutes(entry.hours), taskId, hoursType, ctx });
+        existing.add(key);
+        stats.created++;
+        done.push(kind);
+      } catch (err) {
+        stats.failed++;
+        failures.push(`${label} (${kind}) — ${(err as Error).message}`);
+        done.push(`${kind}: FAILED`);
+      }
+    }
+    const mark = done.some((d) => d.includes('FAILED')) ? '✗' : '✓';
+    console.log(`  ${mark} [${i + 1}/${entries.length}] ${label}  [${done.join(', ')}]`);
+  }
+
+  console.log('\n─────────────────────────────────────');
+  console.log('Summary (Web API mode):');
+  console.log(`  Run ID:                 ${runId}`);
+  console.log(`  Logs:                   ${runDir}`);
+  console.log(`  Records created:        ${stats.created}`);
+  console.log(`  Already existed:        ${stats.skipped}`);
+  console.log(`  Project tasks created:  ${stats.tasksCreated}`);
+  if (failures.length > 0) {
+    console.log(`  Failed:                 ${stats.failed}`);
+    console.log('\nFailures:');
+    failures.forEach((f) => console.log(`  • ${f}`));
+    return false;
+  }
+  console.log('\nAll done! ✓  Записи созданы в статусе Draft — проверьте и нажмите Submit в D365.');
+  return true;
 }
 
 // Print a compact, human-readable account of what the Excel parser saw. Makes
